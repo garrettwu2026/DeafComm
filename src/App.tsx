@@ -82,7 +82,7 @@ export default function App() {
   // Load settings on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('openai_api_key') || '';
-    const savedStreaming = localStorage.getItem('streaming_mode') === 'true';
+    const savedStreaming = localStorage.getItem('use_web_speech') === 'true';
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
     
@@ -95,7 +95,7 @@ export default function App() {
   // Save settings when they change
   const saveSettings = (key: string, streaming: boolean, mirror: boolean) => {
     localStorage.setItem('openai_api_key', key);
-    localStorage.setItem('streaming_mode', String(streaming));
+    localStorage.setItem('use_web_speech', String(streaming));
     localStorage.setItem('mirror_mode', String(mirror));
     setApiKey(key);
     setIsStreamingMode(streaming);
