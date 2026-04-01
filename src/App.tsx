@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share } from 'lucide-react';
+import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share, Loader2 } from 'lucide-react';
 
 type View = 'main' | 'settings' | 'history';
 
@@ -432,7 +432,6 @@ export default function App() {
 
   const transcribeWithWhisper = async (audioBlob: Blob) => {
     setIsProcessing(true);
-    updateCurrentText('正在處理語音...');
     
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.webm');
@@ -466,9 +465,34 @@ export default function App() {
       }
 
       const data = await response.json();
-      updateCurrentText(data.text);
-      saveToHistory(data.text);
-      triggerVibration([100, 50, 100]);
+      const transcribedText = data.text.trim();
+
+      // Whisper Hallucination Filter
+      const hallucinations = [
+        '請不吝點贊訂閱轉發打賞支持明鏡與點點欄目',
+        '點贊訂閱轉發',
+        '謝謝大家',
+        '字幕由 Amara.org 社群提供',
+        '字幕由Amara.org社区提供',
+        '大家下次再見',
+        '大家下次再见',
+        '請訂閱我的頻道',
+        '请订阅我的频道'
+      ];
+
+      if (hallucinations.some(h => transcribedText.includes(h)) && transcribedText.length < 30) {
+        console.log('Filtered Whisper hallucination:', transcribedText);
+        updateCurrentText('');
+        return;
+      }
+
+      if (transcribedText) {
+        updateCurrentText(transcribedText);
+        saveToHistory(transcribedText);
+        triggerVibration([100, 50, 100]);
+      } else {
+        updateCurrentText('');
+      }
     } catch (error: any) {
       console.error('Whisper API Error:', error);
       updateCurrentText(`錯誤: ${error.message}`);
@@ -695,6 +719,15 @@ export default function App() {
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                   </div>
                 )}
+                {isProcessing && (
+                  <div className="bg-blue-600/30 rounded-2xl p-4 self-start max-w-[90%] flex items-center space-x-2">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRefTop} />
               </div>
               {/* Bottom Half Chat */}
@@ -707,6 +740,15 @@ export default function App() {
                 {currentText && currentText !== history[0]?.text && (
                   <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
+                  </div>
+                )}
+                {isProcessing && (
+                  <div className="bg-blue-600/30 rounded-2xl p-4 self-start max-w-[90%] flex items-center space-x-2">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                    </div>
                   </div>
                 )}
                 <div ref={messagesEndRef} />
@@ -724,6 +766,15 @@ export default function App() {
                   <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                 </div>
               )}
+              {isProcessing && (
+                <div className="bg-blue-600/30 rounded-2xl p-4 self-start max-w-[90%] flex items-center space-x-2">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
           )
@@ -732,19 +783,33 @@ export default function App() {
             <>
               {/* Top Half (Rotated 180deg for the other person) */}
               <div className="flex-1 overflow-y-auto p-8 border-b border-gray-800 rotate-180 flex flex-col">
-                <div className="my-auto">
-                  <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
-                    {currentText || '等待說話...'}
-                  </p>
+                <div className="my-auto flex flex-col items-center">
+                  {isProcessing ? (
+                    <div className="flex flex-col items-center space-y-4">
+                      <Loader2 className="animate-spin text-blue-500" style={{ width: fontSize, height: fontSize }} />
+                      <p className="text-blue-400 font-medium" style={{ fontSize: `${Math.max(16, fontSize * 0.3)}px` }}>正在辨識中...</p>
+                    </div>
+                  ) : (
+                    <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
+                      {currentText || '等待說話...'}
+                    </p>
+                  )}
                   <div ref={messagesEndRefTop} />
                 </div>
               </div>
               {/* Bottom Half (Normal for the user) */}
               <div className="flex-1 overflow-y-auto p-8 flex flex-col">
-                <div className="my-auto">
-                  <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
-                    {currentText || '等待說話...'}
-                  </p>
+                <div className="my-auto flex flex-col items-center">
+                  {isProcessing ? (
+                    <div className="flex flex-col items-center space-y-4">
+                      <Loader2 className="animate-spin text-blue-500" style={{ width: fontSize, height: fontSize }} />
+                      <p className="text-blue-400 font-medium" style={{ fontSize: `${Math.max(16, fontSize * 0.3)}px` }}>正在辨識中...</p>
+                    </div>
+                  ) : (
+                    <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
+                      {currentText || '等待說話...'}
+                    </p>
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               </div>
@@ -752,10 +817,17 @@ export default function App() {
           ) : (
             /* Full Screen Normal */
             <div className="flex-1 overflow-y-auto p-8 flex flex-col">
-              <div className="my-auto">
-                <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
-                  {currentText || '點擊下方麥克風開始說話'}
-                </p>
+              <div className="my-auto flex flex-col items-center">
+                {isProcessing ? (
+                  <div className="flex flex-col items-center space-y-4">
+                    <Loader2 className="animate-spin text-blue-500" style={{ width: fontSize, height: fontSize }} />
+                    <p className="text-blue-400 font-medium" style={{ fontSize: `${Math.max(16, fontSize * 0.3)}px` }}>正在辨識中...</p>
+                  </div>
+                ) : (
+                  <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
+                    {currentText || '點擊下方麥克風開始說話'}
+                  </p>
+                )}
                 <div ref={messagesEndRef} />
               </div>
             </div>
