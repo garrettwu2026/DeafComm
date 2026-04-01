@@ -648,7 +648,7 @@ export default function App() {
       )}
 
       {/* Top Navigation Bar */}
-      <div className="absolute top-0 left-0 right-0 p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] flex justify-between items-center z-10">
+      <div className="fixed top-0 left-0 right-0 p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] flex justify-between items-center z-30 bg-gradient-to-b from-black via-black/80 to-transparent">
         <button 
           onClick={() => setView('settings')}
           className="p-3 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition"
@@ -679,7 +679,7 @@ export default function App() {
       </div>
 
       {/* Text Display Area */}
-      <div className="flex-1 flex flex-col w-full h-full pt-24 pb-32">
+      <div className="flex-1 flex flex-col w-full pt-24 pb-32 overflow-hidden">
         {isChatView ? (
           isMirrorMode ? (
             <>
