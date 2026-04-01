@@ -227,6 +227,7 @@ export default function App() {
     if (activeMode === 'streaming' && recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current.onend = null; // Prevent auto-restart
+      recognitionRef.current = null;
       if (currentTextRef.current) {
         saveToHistory(currentTextRef.current);
       }
@@ -236,8 +237,13 @@ export default function App() {
           if (!isRecordingRef.current) startRecording();
         }, 500);
       }
-    } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+    } else if (activeMode === 'ai' && mediaRecorderRef.current) {
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+        // Don't set to null immediately, let onstop handle the final blob
+      } else {
+        mediaRecorderRef.current = null;
+      }
     }
   }, [history]); // Removed isStreamingMode dependency as we use activeMode ref
 
@@ -342,6 +348,13 @@ export default function App() {
       return;
     }
 
+    // Ensure any previous recording is fully stopped before starting a new one
+    if (isRecordingRef.current) {
+      stopRecording();
+      // Wait a brief moment to allow resources to be released
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
     updateCurrentText('');
     setIsRecording(true);
     isRecordingRef.current = true;
@@ -422,7 +435,16 @@ export default function App() {
         };
 
         mediaRecorder.onstop = async () => {
+          // Only process if this is the active media recorder (or if it was just cleared by stopRecording)
+          if (mediaRecorderRef.current !== mediaRecorder && mediaRecorderRef.current !== null) return;
+          
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          
+          // Clean up the ref if it's still pointing to this recorder
+          if (mediaRecorderRef.current === mediaRecorder) {
+            mediaRecorderRef.current = null;
+          }
+          
           await transcribeWithWhisper(audioBlob);
           
           // If continuous mode is on, restart recording after Whisper finishes
