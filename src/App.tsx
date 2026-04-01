@@ -449,6 +449,7 @@ export default function App() {
     }
     
     setIsProcessing(true);
+    const formData = new FormData();
     formData.append('file', audioBlob, 'audio.webm');
     formData.append('model', 'whisper-1');
     formData.append('language', 'zh');
