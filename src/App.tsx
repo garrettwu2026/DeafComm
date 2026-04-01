@@ -690,7 +690,7 @@ export default function App() {
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
                   </div>
                 ))}
-                {currentText && (
+                {currentText && currentText !== history[0]?.text && (
                   <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                   </div>
@@ -704,7 +704,7 @@ export default function App() {
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
                   </div>
                 ))}
-                {currentText && (
+                {currentText && currentText !== history[0]?.text && (
                   <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                   </div>
@@ -719,7 +719,7 @@ export default function App() {
                   <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
                 </div>
               ))}
-              {currentText && (
+              {currentText && currentText !== history[0]?.text && (
                 <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                   <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                 </div>
