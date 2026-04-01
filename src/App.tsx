@@ -108,9 +108,9 @@ export default function App() {
     setIsVibrationEnabled(savedVibration);
   }, []);
 
-  // Auto-scroll for chat view
+  // Auto-scroll for chat view and big text
   useEffect(() => {
-    if (isChatView && view === 'main') {
+    if (view === 'main') {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       messagesEndRefTop.current?.scrollIntoView({ behavior: 'smooth' });
     }
@@ -731,24 +731,33 @@ export default function App() {
           isMirrorMode ? (
             <>
               {/* Top Half (Rotated 180deg for the other person) */}
-              <div className="flex-1 flex items-center justify-center p-8 border-b border-gray-800 rotate-180">
-                <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
-                  {currentText || '等待說話...'}
-                </p>
+              <div className="flex-1 overflow-y-auto p-8 border-b border-gray-800 rotate-180 flex flex-col">
+                <div className="my-auto">
+                  <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
+                    {currentText || '等待說話...'}
+                  </p>
+                  <div ref={messagesEndRefTop} />
+                </div>
               </div>
               {/* Bottom Half (Normal for the user) */}
-              <div className="flex-1 flex items-center justify-center p-8">
-                <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
-                  {currentText || '等待說話...'}
-                </p>
+              <div className="flex-1 overflow-y-auto p-8 flex flex-col">
+                <div className="my-auto">
+                  <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
+                    {currentText || '等待說話...'}
+                  </p>
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
             </>
           ) : (
             /* Full Screen Normal */
-            <div className="flex-1 flex items-center justify-center p-8">
-              <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
-                {currentText || '點擊下方麥克風開始說話'}
-              </p>
+            <div className="flex-1 overflow-y-auto p-8 flex flex-col">
+              <div className="my-auto">
+                <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
+                  {currentText || '點擊下方麥克風開始說話'}
+                </p>
+                <div ref={messagesEndRef} />
+              </div>
             </div>
           )
         )}
