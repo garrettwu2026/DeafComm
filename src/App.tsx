@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share, Palette } from 'lucide-react';
+import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share } from 'lucide-react';
 
 type View = 'main' | 'settings' | 'history';
-type Theme = 'dark' | 'light' | 'high-contrast';
 
 interface HistoryItem {
   id: string;
@@ -17,7 +16,6 @@ export default function App() {
   const [isMirrorMode, setIsMirrorMode] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [isChatView, setIsChatView] = useState(false);
-  const [theme, setTheme] = useState<Theme>('dark');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [fontSize, setFontSize] = useState(48);
   const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
@@ -95,7 +93,6 @@ export default function App() {
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
     const savedContinuous = localStorage.getItem('continuous_mode') === 'true';
     const savedChatView = localStorage.getItem('chat_view_mode') === 'true';
-    const savedTheme = (localStorage.getItem('app_theme') as Theme) || 'dark';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
     const savedFontSize = parseInt(localStorage.getItem('font_size') || '48', 10);
     const savedVibration = localStorage.getItem('vibration_enabled') !== 'false';
@@ -106,7 +103,6 @@ export default function App() {
     setIsContinuousMode(savedContinuous);
     isContinuousModeRef.current = savedContinuous;
     setIsChatView(savedChatView);
-    setTheme(savedTheme);
     setHistory(savedHistory);
     setFontSize(savedFontSize);
     setIsVibrationEnabled(savedVibration);
@@ -119,51 +115,6 @@ export default function App() {
       messagesEndRefTop.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [history, currentText, isChatView, view]);
-
-  const changeTheme = (newTheme: Theme) => {
-    setTheme(newTheme);
-    localStorage.setItem('app_theme', newTheme);
-  };
-
-  const themeStyles = {
-    dark: {
-      bg: 'bg-black',
-      text: 'text-white',
-      textMuted: 'text-gray-400',
-      card: 'bg-gray-900 border-gray-800',
-      button: 'bg-white/10 hover:bg-white/20 text-white',
-      buttonActive: 'bg-blue-600 text-white',
-      bubble: 'bg-gray-800 text-white',
-      bubbleActive: 'bg-blue-600 text-white',
-      mirrorText: 'text-blue-400',
-      navIcon: 'text-white',
-    },
-    light: {
-      bg: 'bg-gray-50',
-      text: 'text-gray-900',
-      textMuted: 'text-gray-500',
-      card: 'bg-white border-gray-200',
-      button: 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 shadow-sm',
-      buttonActive: 'bg-blue-500 text-white shadow-sm',
-      bubble: 'bg-white border border-gray-200 text-gray-900 shadow-sm',
-      bubbleActive: 'bg-blue-500 text-white shadow-sm',
-      mirrorText: 'text-blue-600',
-      navIcon: 'text-gray-700',
-    },
-    'high-contrast': {
-      bg: 'bg-black',
-      text: 'text-yellow-400 font-bold tracking-wide',
-      textMuted: 'text-yellow-200',
-      card: 'bg-black border-2 border-yellow-400',
-      button: 'bg-black border-2 border-yellow-400 text-yellow-400 hover:bg-yellow-400/20',
-      buttonActive: 'bg-yellow-400 text-black font-bold',
-      bubble: 'bg-black border-2 border-yellow-400 text-yellow-400',
-      bubbleActive: 'bg-yellow-400 text-black font-bold',
-      mirrorText: 'text-cyan-400',
-      navIcon: 'text-yellow-400',
-    }
-  };
-  const currentTheme = themeStyles[theme];
 
   // Save settings when they change
   const saveSettings = (key: string, streaming: boolean, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
@@ -520,59 +471,35 @@ export default function App() {
       triggerVibration([100, 50, 100]);
     } catch (error: any) {
       console.error('Whisper API Error:', error);
-      updateCurrentText(`語音辨識失敗: ${error.message}`);
-      triggerVibration([300]);
+      updateCurrentText(`錯誤: ${error.message}`);
+      triggerVibration(500);
     } finally {
       setIsProcessing(false);
-      
-      // If continuous mode is on, automatically restart recording after a short delay
-      if (isContinuousModeRef.current) {
-        setTimeout(() => {
-          if (!isRecordingRef.current) {
-            startRecording();
-          }
-        }, 1000);
-      }
+    }
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
     }
   };
 
   // Render Settings View
   if (view === 'settings') {
     return (
-      <div className={`min-h-screen ${currentTheme.bg} flex flex-col p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] transition-colors duration-300`}>
+      <div className="min-h-screen bg-gray-50 flex flex-col p-6 pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <div className="flex items-center mb-8">
-          <button onClick={() => setView('main')} className={`p-2 rounded-full ${currentTheme.button} transition`}>
-            <ArrowLeft className={`w-8 h-8 ${currentTheme.navIcon}`} />
+          <button onClick={() => setView('main')} className="p-2 rounded-full hover:bg-gray-200 transition">
+            <ArrowLeft className="w-8 h-8 text-gray-700" />
           </button>
-          <h1 className={`text-3xl font-bold ml-4 ${currentTheme.text}`}>設定</h1>
+          <h1 className="text-3xl font-bold ml-4 text-gray-900">設定</h1>
         </div>
 
         <div className="space-y-8 max-w-md mx-auto w-full">
-          {/* Theme Selector */}
-          <div className={`p-6 rounded-2xl shadow-sm border ${currentTheme.card} transition-colors duration-300`}>
-            <div className="flex items-center mb-4">
-              <Palette className={`w-6 h-6 mr-2 ${currentTheme.text}`} />
-              <h3 className={`text-lg font-medium ${currentTheme.text}`}>外觀主題</h3>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {(['light', 'dark', 'high-contrast'] as Theme[]).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => changeTheme(t)}
-                  className={`py-3 rounded-xl border text-center font-medium transition-all ${
-                    theme === t 
-                      ? currentTheme.buttonActive 
-                      : `${currentTheme.bg} ${currentTheme.text} border-gray-500/30 hover:opacity-80`
-                  }`}
-                >
-                  {t === 'light' ? '亮色' : t === 'dark' ? '暗色' : '高對比'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className={`p-6 rounded-2xl shadow-sm border ${currentTheme.card} transition-colors duration-300`}>
-            <label className={`block text-lg font-medium mb-2 ${currentTheme.text}`}>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <label className="block text-lg font-medium text-gray-700 mb-2">
               OpenAI API Key
             </label>
             <input
@@ -580,17 +507,17 @@ export default function App() {
               value={apiKey}
               onChange={(e) => saveSettings(e.target.value, isStreamingMode, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
               placeholder="sk-..."
-              className={`w-full p-4 text-lg border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition ${theme === 'high-contrast' ? 'bg-black border-yellow-400 text-yellow-400 placeholder-yellow-700' : 'bg-white border-gray-300 text-gray-900'}`}
+              className="w-full p-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
             />
-            <p className={`text-sm mt-2 ${currentTheme.textMuted}`}>
+            <p className="text-sm text-gray-500 mt-2">
               金鑰將加密儲存於您的設備中，不會上傳至其他伺服器。
             </p>
           </div>
 
-          <div className={`p-6 rounded-2xl shadow-sm border flex items-center justify-between ${currentTheme.card} transition-colors duration-300`}>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
             <div className="pr-4">
-              <h3 className={`text-lg font-medium ${currentTheme.text}`}>即時串流模式 (Web Speech)</h3>
-              <p className={`text-sm mt-1 ${currentTheme.textMuted}`}>
+              <h3 className="text-lg font-medium text-gray-900">即時串流模式 (Web Speech)</h3>
+              <p className="text-sm text-gray-500 mt-1">
                 開啟：文字逐字顯示，速度快。<br/>
                 關閉：使用標準模式 (Whisper API)，準確度極高且有標點符號，但需等待整句話講完。
               </p>
@@ -602,16 +529,16 @@ export default function App() {
                 checked={isStreamingMode}
                 onChange={(e) => saveSettings(apiKey, e.target.checked, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
               />
-              <div className={`w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all ${theme === 'high-contrast' ? 'peer-checked:bg-yellow-500' : 'peer-checked:bg-blue-600'}`}></div>
+              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
           </div>
 
-          <div className={`p-6 rounded-2xl shadow-sm border flex items-center justify-between ${currentTheme.card} transition-colors duration-300`}>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
             <div className="pr-4">
-              <h3 className={`text-lg font-medium ${currentTheme.text}`}>連續聆聽模式</h3>
-              <p className={`text-sm mt-1 ${currentTheme.textMuted}`}>
+              <h3 className="text-lg font-medium text-gray-900">連續聆聽模式</h3>
+              <p className="text-sm text-gray-500 mt-1">
                 開啟後，當對方講完一句話停頓時，系統會自動重新啟動麥克風繼續收音，全程不需手動按按鈕。
-                <br/><span className={theme === 'high-contrast' ? 'text-yellow-300' : 'text-blue-500'}>建議搭配「即時串流模式」使用，避免消耗過多 API 額度。</span>
+                <br/><span className="text-blue-500">建議搭配「即時串流模式」使用，避免消耗過多 API 額度。</span>
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer shrink-0">
@@ -621,14 +548,14 @@ export default function App() {
                 checked={isContinuousMode}
                 onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, e.target.checked, fontSize, isVibrationEnabled)}
               />
-              <div className={`w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all ${theme === 'high-contrast' ? 'peer-checked:bg-yellow-500' : 'peer-checked:bg-blue-600'}`}></div>
+              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
           </div>
 
-          <div className={`p-6 rounded-2xl shadow-sm border flex items-center justify-between ${currentTheme.card} transition-colors duration-300`}>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
             <div className="pr-4">
-              <h3 className={`text-lg font-medium ${currentTheme.text}`}>觸覺回饋 (震動提示)</h3>
-              <p className={`text-sm mt-1 ${currentTheme.textMuted}`}>
+              <h3 className="text-lg font-medium text-gray-900">觸覺回饋 (震動提示)</h3>
+              <p className="text-sm text-gray-500 mt-1">
                 開啟後，在開始收音、辨識完成或發生錯誤時，手機會發出震動提示。(iOS 系統不支援)
               </p>
             </div>
@@ -639,14 +566,14 @@ export default function App() {
                 checked={isVibrationEnabled}
                 onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, isContinuousMode, fontSize, e.target.checked)}
               />
-              <div className={`w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all ${theme === 'high-contrast' ? 'peer-checked:bg-yellow-500' : 'peer-checked:bg-blue-600'}`}></div>
+              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
           </div>
 
-          <div className={`p-6 rounded-2xl shadow-sm border ${currentTheme.card} transition-colors duration-300`}>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
             <div className="flex justify-between items-center mb-4">
-              <h3 className={`text-lg font-medium ${currentTheme.text}`}>字體大小</h3>
-              <span className={`text-lg font-medium ${theme === 'high-contrast' ? 'text-yellow-400' : 'text-blue-600'}`}>{fontSize}px</span>
+              <h3 className="text-lg font-medium text-gray-900">字體大小</h3>
+              <span className="text-lg font-medium text-blue-600">{fontSize}px</span>
             </div>
             <input 
               type="range" 
@@ -655,9 +582,9 @@ export default function App() {
               step="4"
               value={fontSize}
               onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, isContinuousMode, parseInt(e.target.value, 10), isVibrationEnabled)}
-              className={`w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer ${theme === 'high-contrast' ? 'accent-yellow-500' : 'accent-blue-600'}`}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
             />
-            <div className={`flex justify-between text-sm mt-2 ${currentTheme.textMuted}`}>
+            <div className="flex justify-between text-sm text-gray-500 mt-2">
               <span>小</span>
               <span>大</span>
             </div>
@@ -670,21 +597,21 @@ export default function App() {
   // Render History View
   if (view === 'history') {
     return (
-      <div className={`min-h-screen ${currentTheme.bg} flex flex-col p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] transition-colors duration-300`}>
+      <div className="min-h-screen bg-gray-50 flex flex-col p-6 pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center">
-            <button onClick={() => setView('main')} className={`p-2 rounded-full ${currentTheme.button} transition`}>
-              <ArrowLeft className={`w-8 h-8 ${currentTheme.navIcon}`} />
+            <button onClick={() => setView('main')} className="p-2 rounded-full hover:bg-gray-200 transition">
+              <ArrowLeft className="w-8 h-8 text-gray-700" />
             </button>
-            <h1 className={`text-3xl font-bold ml-4 ${currentTheme.text}`}>歷史紀錄</h1>
+            <h1 className="text-3xl font-bold ml-4 text-gray-900">歷史紀錄</h1>
           </div>
           <div className="flex items-center space-x-2">
             {history.length > 0 && (
               <>
-                <button onClick={exportHistory} className={`p-2 ${theme === 'high-contrast' ? 'text-yellow-400 hover:bg-yellow-400/10' : 'text-blue-500 hover:bg-blue-500/10'} rounded-full transition`}>
+                <button onClick={exportHistory} className="p-2 text-blue-500 hover:bg-blue-50 rounded-full transition">
                   <Share className="w-8 h-8" />
                 </button>
-                <button onClick={clearHistory} className="p-2 text-red-500 hover:bg-red-500/10 rounded-full transition">
+                <button onClick={clearHistory} className="p-2 text-red-500 hover:bg-red-50 rounded-full transition">
                   <Trash2 className="w-8 h-8" />
                 </button>
               </>
@@ -694,12 +621,12 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto space-y-4 max-w-2xl mx-auto w-full pb-10">
           {history.length === 0 ? (
-            <div className={`text-center mt-20 text-xl ${currentTheme.textMuted}`}>尚無紀錄</div>
+            <div className="text-center text-gray-500 mt-20 text-xl">尚無紀錄</div>
           ) : (
             history.map((item) => (
-              <div key={item.id} className={`p-6 rounded-2xl shadow-sm border ${currentTheme.card} transition-colors duration-300`}>
-                <p className={`text-2xl leading-relaxed ${currentTheme.text}`}>{item.text}</p>
-                <p className={`text-sm mt-4 ${currentTheme.textMuted}`}>
+              <div key={item.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <p className="text-2xl text-gray-900 leading-relaxed">{item.text}</p>
+                <p className="text-sm text-gray-400 mt-4">
                   {new Date(item.date).toLocaleString('zh-TW')}
                 </p>
               </div>
@@ -712,7 +639,7 @@ export default function App() {
 
   // Render Main View
   return (
-    <div className={`min-h-screen ${currentTheme.bg} flex flex-col ${currentTheme.text} overflow-hidden relative transition-colors duration-300`}>
+    <div className="min-h-screen bg-black flex flex-col text-white overflow-hidden relative">
       {/* Full-screen Breathing Light Indicator */}
       {isRecording && (
         <div className="absolute inset-0 pointer-events-none z-0">
@@ -724,30 +651,30 @@ export default function App() {
       <div className="absolute top-0 left-0 right-0 p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] flex justify-between items-center z-10">
         <button 
           onClick={() => setView('settings')}
-          className={`p-3 backdrop-blur-md rounded-full transition ${currentTheme.button}`}
+          className="p-3 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition"
         >
-          <Settings className={`w-8 h-8 ${currentTheme.navIcon}`} />
+          <Settings className="w-8 h-8" />
         </button>
         
         <button 
           onClick={() => saveSettings(apiKey, isStreamingMode, !isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
-          className={`p-3 backdrop-blur-md rounded-full transition ${isMirrorMode ? currentTheme.buttonActive : currentTheme.button}`}
+          className={`p-3 backdrop-blur-md rounded-full transition ${isMirrorMode ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
         >
-          <FlipVertical className={`w-8 h-8 ${isMirrorMode ? 'text-white' : currentTheme.navIcon}`} />
+          <FlipVertical className="w-8 h-8" />
         </button>
 
         <button 
           onClick={toggleChatView}
-          className={`p-3 backdrop-blur-md rounded-full transition ${isChatView ? currentTheme.buttonActive : currentTheme.button}`}
+          className={`p-3 backdrop-blur-md rounded-full transition ${isChatView ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
         >
-          <MessageSquare className={`w-8 h-8 ${isChatView ? 'text-white' : currentTheme.navIcon}`} />
+          <MessageSquare className="w-8 h-8" />
         </button>
 
         <button 
           onClick={() => setView('history')}
-          className={`p-3 backdrop-blur-md rounded-full transition ${currentTheme.button}`}
+          className="p-3 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition"
         >
-          <History className={`w-8 h-8 ${currentTheme.navIcon}`} />
+          <History className="w-8 h-8" />
         </button>
       </div>
 
@@ -757,14 +684,14 @@ export default function App() {
           isMirrorMode ? (
             <>
               {/* Top Half Chat (Rotated) */}
-              <div className={`flex-1 overflow-y-auto p-6 border-b ${theme === 'light' ? 'border-gray-200' : 'border-gray-800'} rotate-180 flex flex-col space-y-4`}>
+              <div className="flex-1 overflow-y-auto p-6 border-b border-gray-800 rotate-180 flex flex-col space-y-4">
                 {[...history].reverse().map(item => (
-                  <div key={item.id} className={`rounded-2xl p-4 self-start max-w-[90%] ${currentTheme.bubble}`}>
-                    <p className={currentTheme.text} style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
+                  <div key={item.id} className="bg-gray-800 rounded-2xl p-4 self-start max-w-[90%]">
+                    <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
                   </div>
                 ))}
                 {currentText && currentText !== history[0]?.text && (
-                  <div className={`rounded-2xl p-4 self-start max-w-[90%] animate-pulse ${currentTheme.bubbleActive}`}>
+                  <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                   </div>
                 )}
@@ -773,12 +700,12 @@ export default function App() {
               {/* Bottom Half Chat */}
               <div className="flex-1 overflow-y-auto p-6 flex flex-col space-y-4">
                 {[...history].reverse().map(item => (
-                  <div key={item.id} className={`rounded-2xl p-4 self-start max-w-[90%] ${currentTheme.bubble}`}>
-                    <p className={currentTheme.text} style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
+                  <div key={item.id} className="bg-gray-800 rounded-2xl p-4 self-start max-w-[90%]">
+                    <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
                   </div>
                 ))}
                 {currentText && currentText !== history[0]?.text && (
-                  <div className={`rounded-2xl p-4 self-start max-w-[90%] animate-pulse ${currentTheme.bubbleActive}`}>
+                  <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                     <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                   </div>
                 )}
@@ -788,12 +715,12 @@ export default function App() {
           ) : (
             <div className="flex-1 overflow-y-auto p-6 flex flex-col space-y-4">
               {[...history].reverse().map(item => (
-                <div key={item.id} className={`rounded-2xl p-4 self-start max-w-[90%] ${currentTheme.bubble}`}>
-                  <p className={currentTheme.text} style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
+                <div key={item.id} className="bg-gray-800 rounded-2xl p-4 self-start max-w-[90%]">
+                  <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
                 </div>
               ))}
               {currentText && currentText !== history[0]?.text && (
-                <div className={`rounded-2xl p-4 self-start max-w-[90%] animate-pulse ${currentTheme.bubbleActive}`}>
+                <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
                   <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
                 </div>
               )}
@@ -804,14 +731,14 @@ export default function App() {
           isMirrorMode ? (
             <>
               {/* Top Half (Rotated 180deg for the other person) */}
-              <div className={`flex-1 flex items-center justify-center p-8 border-b ${theme === 'light' ? 'border-gray-200' : 'border-gray-800'} rotate-180`}>
-                <p className={`font-medium leading-tight text-center ${currentTheme.mirrorText}`} style={{ fontSize: `${fontSize}px` }}>
+              <div className="flex-1 flex items-center justify-center p-8 border-b border-gray-800 rotate-180">
+                <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
                   {currentText || '等待說話...'}
                 </p>
               </div>
               {/* Bottom Half (Normal for the user) */}
               <div className="flex-1 flex items-center justify-center p-8">
-                <p className={`font-medium leading-tight text-center ${currentTheme.text}`} style={{ fontSize: `${fontSize}px` }}>
+                <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
                   {currentText || '等待說話...'}
                 </p>
               </div>
@@ -819,7 +746,7 @@ export default function App() {
           ) : (
             /* Full Screen Normal */
             <div className="flex-1 flex items-center justify-center p-8">
-              <p className={`font-medium leading-tight text-center ${currentTheme.text}`} style={{ fontSize: `${fontSize}px` }}>
+              <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
                 {currentText || '點擊下方麥克風開始說話'}
               </p>
             </div>
@@ -828,7 +755,7 @@ export default function App() {
       </div>
 
       {/* Bottom Microphone Button & Waveform */}
-      <div className={`absolute bottom-0 left-0 right-0 p-8 pb-[calc(2rem+env(safe-area-inset-bottom))] flex flex-col justify-end items-center bg-gradient-to-t ${theme === 'light' ? 'from-white via-white/80' : 'from-black via-black/80'} to-transparent transition-colors duration-300`}>
+      <div className="absolute bottom-0 left-0 right-0 p-8 pb-[calc(2rem+env(safe-area-inset-bottom))] flex flex-col justify-end items-center bg-gradient-to-t from-black via-black/80 to-transparent">
         
         {/* VAD Status Indicator */}
         <div className="h-8 mb-4 flex items-center justify-center">
