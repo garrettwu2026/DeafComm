@@ -1,0 +1,17 @@
+{
+  "name": "聽障溝通助手 (DeafComm)",
+  "short_name": "DeafComm",
+  "description": "專為聽障人士設計的極簡語音轉文字溝通工具",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

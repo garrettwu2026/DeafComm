@@ -1,0 +1,7 @@
+{
+  "name": "聽障溝通助手 (DeafComm)",
+  "description": "專為聽障人士設計的極簡語音轉文字溝通工具，支援上下鏡像顯示與 Whisper AI。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
