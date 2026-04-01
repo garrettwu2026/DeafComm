@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical } from 'lucide-react';
 
 type View = 'main' | 'settings' | 'history';
@@ -19,11 +19,65 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [currentText, setCurrentText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [vadStatus, setVadStatus] = useState<'listening' | 'silence' | 'stopping'>('listening');
 
-  // Refs for recording
+  // Refs for recording and VAD
+  const isRecordingRef = useRef(false);
+  const currentTextRef = useRef('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  
+  // Refs for Audio Visualizer & VAD
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const lastAudioTimeRef = useRef<number>(Date.now());
+  const hasSpokenRef = useRef<boolean>(false);
+  const vadStatusRef = useRef<'listening' | 'silence' | 'stopping'>('listening');
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Ref for Screen Wake Lock
+  const wakeLockRef = useRef<any>(null);
+
+  // Request Screen Wake Lock
+  const requestWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      }
+    } catch (err) {
+      console.log('Wake Lock error:', err);
+    }
+  };
+
+  useEffect(() => {
+    requestWakeLock();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (canvasRef.current) {
+        canvasRef.current.width = window.innerWidth;
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Load settings on mount
   useEffect(() => {
@@ -67,6 +121,132 @@ export default function App() {
     }
   };
 
+  const updateCurrentText = (text: string) => {
+    setCurrentText(text);
+    currentTextRef.current = text;
+  };
+
+  const stopRecording = useCallback(() => {
+    if (!isRecordingRef.current) return;
+    setIsRecording(false);
+    isRecordingRef.current = false;
+    setAudioLevel(0);
+    setVadStatus('listening');
+    vadStatusRef.current = 'listening';
+    
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(console.error);
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    if (isStreamingMode && recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current.onend = null; // Prevent auto-restart
+      if (currentTextRef.current) {
+        saveToHistory(currentTextRef.current);
+      }
+    } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  }, [isStreamingMode, history]);
+
+  const setupAudioAnalysis = (stream: MediaStream) => {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    const audioCtx = new AudioContextClass();
+    const analyser = audioCtx.createAnalyser();
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    analyser.fftSize = 256;
+    
+    audioContextRef.current = audioCtx;
+    analyserRef.current = analyser;
+    lastAudioTimeRef.current = Date.now();
+    hasSpokenRef.current = false;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const updateLevel = () => {
+      if (!isRecordingRef.current) return;
+      
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+      setAudioLevel(average);
+
+      // Draw Waveform on Canvas
+      if (canvasRef.current) {
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const width = canvas.width;
+          const height = canvas.height;
+          ctx.clearRect(0, 0, width, height);
+          
+          const barWidth = (width / bufferLength) * 2.5;
+          let x = 0;
+          
+          for (let i = 0; i < bufferLength; i++) {
+            const barHeight = (dataArray[i] / 255) * height;
+            
+            // Create gradient
+            const gradient = ctx.createLinearGradient(0, height, 0, 0);
+            gradient.addColorStop(0, '#3b82f6'); // blue-500
+            gradient.addColorStop(1, '#ef4444'); // red-500
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+            
+            x += barWidth + 1;
+          }
+        }
+      }
+
+      // VAD (Voice Activity Detection) Logic
+      let currentVadStatus: 'listening' | 'silence' | 'stopping' = 'listening';
+      
+      if (average > 15) { // Threshold for detecting voice
+        lastAudioTimeRef.current = Date.now();
+        hasSpokenRef.current = true;
+        currentVadStatus = 'listening';
+      } else {
+        const silenceDuration = Date.now() - lastAudioTimeRef.current;
+        
+        if (hasSpokenRef.current) {
+          if (silenceDuration > 2500) {
+            stopRecording();
+            return;
+          } else if (silenceDuration > 1500) {
+            currentVadStatus = 'stopping';
+          } else {
+            currentVadStatus = 'silence';
+          }
+        } else {
+          if (silenceDuration > 10000) {
+            stopRecording();
+            return;
+          }
+        }
+      }
+
+      if (vadStatusRef.current !== currentVadStatus) {
+        vadStatusRef.current = currentVadStatus;
+        setVadStatus(currentVadStatus);
+      }
+
+      animationFrameRef.current = requestAnimationFrame(updateLevel);
+    };
+    updateLevel();
+  };
+
   const startRecording = async () => {
     if (!apiKey && !isStreamingMode) {
       alert('請先至設定輸入 OpenAI API Key，或開啟內建串流模式。');
@@ -74,55 +254,69 @@ export default function App() {
       return;
     }
 
-    setCurrentText('');
+    updateCurrentText('');
     setIsRecording(true);
+    isRecordingRef.current = true;
 
-    if (isStreamingMode) {
-      // Use Web Speech API for real-time streaming
-      const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        alert('您的瀏覽器不支援語音辨識串流，請關閉串流模式改用 Whisper。');
-        setIsRecording(false);
-        return;
-      }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      setupAudioAnalysis(stream);
 
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'zh-TW';
+      if (isStreamingMode) {
+        // Use Web Speech API for real-time streaming
+        const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          alert('您的瀏覽器不支援語音辨識串流，請關閉串流模式改用 Whisper。');
+          stopRecording();
+          return;
+        }
 
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'zh-TW';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
+        recognition.onresult = (event: any) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
           }
-        }
-        setCurrentText(finalTranscript + interimTranscript);
-      };
+          updateCurrentText(finalTranscript + interimTranscript);
+          
+          // Reset silence timer when speech is recognized
+          lastAudioTimeRef.current = Date.now();
+          hasSpokenRef.current = true;
+        };
 
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
-        stopRecording();
-      };
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error);
+          if (event.error !== 'no-speech') {
+            stopRecording();
+          }
+        };
 
-      recognition.onend = () => {
-        if (isRecording) {
-          recognition.start(); // Restart if still recording
-        }
-      };
+        recognition.onend = () => {
+          if (isRecordingRef.current) {
+            try {
+              recognition.start(); // Restart if still recording
+            } catch (e) {
+              console.error(e);
+            }
+          }
+        };
 
-      recognitionRef.current = recognition;
-      recognition.start();
+        recognitionRef.current = recognition;
+        recognition.start();
 
-    } else {
-      // Use MediaRecorder for Whisper API
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } else {
+        // Use MediaRecorder for Whisper API
         const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
@@ -136,35 +330,20 @@ export default function App() {
         mediaRecorder.onstop = async () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           await transcribeWithWhisper(audioBlob);
-          stream.getTracks().forEach(track => track.stop());
         };
 
         mediaRecorder.start();
-      } catch (err) {
-        console.error('Error accessing microphone:', err);
-        alert('無法存取麥克風，請確認權限。');
-        setIsRecording(false);
       }
-    }
-  };
-
-  const stopRecording = () => {
-    setIsRecording(false);
-    
-    if (isStreamingMode && recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current.onend = null; // Prevent auto-restart
-      if (currentText) {
-        saveToHistory(currentText);
-      }
-    } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      alert('無法存取麥克風，請確認權限。');
+      stopRecording();
     }
   };
 
   const transcribeWithWhisper = async (audioBlob: Blob) => {
     setIsProcessing(true);
-    setCurrentText('正在處理語音...');
+    updateCurrentText('正在處理語音...');
     
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.webm');
@@ -182,15 +361,26 @@ export default function App() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'API 請求失敗');
+        const errMsg = errorData.error?.message || 'API 請求失敗';
+        
+        // API Key Error Handling
+        if (response.status === 401 || errMsg.toLowerCase().includes('api key')) {
+          alert('OpenAI API Key 無效或已過期，請重新檢查設定。');
+          setApiKey(''); // Clear invalid key
+          localStorage.removeItem('openai_api_key');
+          setView('settings');
+          updateCurrentText('API Key 錯誤');
+          return;
+        }
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
-      setCurrentText(data.text);
+      updateCurrentText(data.text);
       saveToHistory(data.text);
     } catch (error: any) {
       console.error('Whisper API Error:', error);
-      setCurrentText(`錯誤: ${error.message}`);
+      updateCurrentText(`錯誤: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -207,7 +397,7 @@ export default function App() {
   // Render Settings View
   if (view === 'settings') {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col p-6">
+      <div className="min-h-screen bg-gray-50 flex flex-col p-6 pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <div className="flex items-center mb-8">
           <button onClick={() => setView('main')} className="p-2 rounded-full hover:bg-gray-200 transition">
             <ArrowLeft className="w-8 h-8 text-gray-700" />
@@ -255,7 +445,7 @@ export default function App() {
   // Render History View
   if (view === 'history') {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col p-6">
+      <div className="min-h-screen bg-gray-50 flex flex-col p-6 pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center">
             <button onClick={() => setView('main')} className="p-2 rounded-full hover:bg-gray-200 transition">
@@ -342,32 +532,64 @@ export default function App() {
         )}
       </div>
 
-      {/* Bottom Microphone Button */}
-      <div className="absolute bottom-0 left-0 right-0 p-8 pb-[calc(2rem+env(safe-area-inset-bottom))] flex justify-center items-center bg-gradient-to-t from-black via-black/80 to-transparent">
+      {/* Bottom Microphone Button & Waveform */}
+      <div className="absolute bottom-0 left-0 right-0 p-8 pb-[calc(2rem+env(safe-area-inset-bottom))] flex flex-col justify-end items-center bg-gradient-to-t from-black via-black/80 to-transparent">
+        
+        {/* VAD Status Indicator */}
+        <div className="h-8 mb-4 flex items-center justify-center">
+          {isRecording && (
+            <span className={`text-sm font-medium px-4 py-1.5 rounded-full transition-colors duration-300 ${
+              vadStatus === 'listening' ? 'bg-blue-500/20 text-blue-400' :
+              vadStatus === 'silence' ? 'bg-gray-500/20 text-gray-400' :
+              'bg-red-500/20 text-red-400 animate-pulse'
+            }`}>
+              {vadStatus === 'listening' ? '正在聆聽...' :
+               vadStatus === 'silence' ? '未偵測到聲音' :
+               '即將自動停止...'}
+            </span>
+          )}
+        </div>
+
+        {/* Audio Waveform Canvas */}
+        <canvas 
+          ref={canvasRef} 
+          width={window.innerWidth} 
+          height={60} 
+          className={`w-full h-[60px] mb-6 transition-opacity duration-300 ${isRecording ? 'opacity-100' : 'opacity-0'}`} 
+        />
+
         <button
           onClick={toggleRecording}
           disabled={isProcessing}
           className={`
-            relative group flex items-center justify-center w-24 h-24 rounded-full transition-all duration-300 shadow-2xl
+            relative group flex items-center justify-center w-24 h-24 rounded-full transition-all duration-300 shadow-2xl z-10
             ${isRecording 
-              ? 'bg-red-500 hover:bg-red-600 scale-110 animate-pulse' 
+              ? 'bg-red-500 hover:bg-red-600' 
               : 'bg-blue-600 hover:bg-blue-700 hover:scale-105'}
             ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}
           `}
         >
-          {isRecording ? (
-            <Square className="w-10 h-10 text-white fill-current" />
-          ) : (
-            <Mic className="w-12 h-12 text-white" />
-          )}
-          
-          {/* Ripple effect when recording */}
+          {/* Pulsing Background */}
           {isRecording && (
-            <div className="absolute inset-0 rounded-full border-4 border-red-500 animate-ping opacity-75"></div>
+            <>
+              <div 
+                className="absolute inset-0 rounded-full bg-red-500 opacity-40 transition-transform duration-75 pointer-events-none"
+                style={{ transform: `scale(${1 + audioLevel / 40})` }}
+              ></div>
+              <div 
+                className="absolute inset-0 rounded-full border-2 border-red-400 opacity-60 transition-transform duration-75 pointer-events-none"
+                style={{ transform: `scale(${1 + audioLevel / 20})` }}
+              ></div>
+            </>
+          )}
+
+          {isRecording ? (
+            <Square className="w-10 h-10 text-white fill-current relative z-10" />
+          ) : (
+            <Mic className="w-12 h-12 text-white relative z-10" />
           )}
         </button>
       </div>
     </div>
   );
 }
-
