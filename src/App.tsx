@@ -12,7 +12,7 @@ interface HistoryItem {
 export default function App() {
   const [view, setView] = useState<View>('main');
   const [apiKey, setApiKey] = useState('');
-  const [isStreamingMode, setIsStreamingMode] = useState(true);
+  const [isStreamingMode, setIsStreamingMode] = useState(false);
   const [isMirrorMode, setIsMirrorMode] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   
@@ -82,7 +82,7 @@ export default function App() {
   // Load settings on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('openai_api_key') || '';
-    const savedStreaming = localStorage.getItem('streaming_mode') !== 'false';
+    const savedStreaming = localStorage.getItem('streaming_mode') === 'true';
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
     
@@ -423,11 +423,14 @@ export default function App() {
           </div>
 
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">即時串流模式</h3>
-              <p className="text-sm text-gray-500 mt-1">開啟後文字將逐字顯示，減少等待焦慮。(使用內建語音引擎)</p>
+            <div className="pr-4">
+              <h3 className="text-lg font-medium text-gray-900">即時串流模式 (Web Speech)</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                開啟：文字逐字顯示，速度快。<br/>
+                關閉：使用標準模式 (Whisper API)，準確度極高且有標點符號，但需等待整句話講完。
+              </p>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
               <input 
                 type="checkbox" 
                 className="sr-only peer"
