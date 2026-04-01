@@ -28,6 +28,7 @@ export default function App() {
 
   // Refs for recording and VAD
   const isRecordingRef = useRef(false);
+  const recordingModeRef = useRef<'streaming' | 'ai' | null>(null);
   const isContinuousModeRef = useRef(false);
   const currentTextRef = useRef('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -118,6 +119,11 @@ export default function App() {
 
   // Save settings when they change
   const saveSettings = (key: string, streaming: boolean, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
+    // If mode changed, stop current recording to prevent state mismatch
+    if (streaming !== isStreamingMode && isRecordingRef.current) {
+      stopRecording();
+    }
+
     localStorage.setItem('openai_api_key', key);
     localStorage.setItem('use_web_speech', String(streaming));
     localStorage.setItem('mirror_mode', String(mirror));
@@ -199,8 +205,13 @@ export default function App() {
 
   const stopRecording = useCallback((isAutoStop = false) => {
     if (!isRecordingRef.current) return;
+    
     setIsRecording(false);
     isRecordingRef.current = false;
+    
+    const activeMode = recordingModeRef.current;
+    recordingModeRef.current = null;
+
     setAudioLevel(0);
     setVadStatus('listening');
     vadStatusRef.current = 'listening';
@@ -213,7 +224,7 @@ export default function App() {
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     
-    if (isStreamingMode && recognitionRef.current) {
+    if (activeMode === 'streaming' && recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current.onend = null; // Prevent auto-restart
       if (currentTextRef.current) {
@@ -228,7 +239,7 @@ export default function App() {
     } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-  }, [isStreamingMode, history]);
+  }, [history]); // Removed isStreamingMode dependency as we use activeMode ref
 
   const setupAudioAnalysis = (stream: MediaStream) => {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -334,6 +345,7 @@ export default function App() {
     updateCurrentText('');
     setIsRecording(true);
     isRecordingRef.current = true;
+    recordingModeRef.current = isStreamingMode ? 'streaming' : 'ai';
     triggerVibration(50);
 
     try {
@@ -431,9 +443,12 @@ export default function App() {
   };
 
   const transcribeWithWhisper = async (audioBlob: Blob) => {
-    setIsProcessing(true);
+    if (!audioBlob || audioBlob.size < 100) {
+      setIsProcessing(false);
+      return;
+    }
     
-    const formData = new FormData();
+    setIsProcessing(true);
     formData.append('file', audioBlob, 'audio.webm');
     formData.append('model', 'whisper-1');
     formData.append('language', 'zh');
