@@ -15,6 +15,8 @@ export default function App() {
   const [isStreamingMode, setIsStreamingMode] = useState(false);
   const [isMirrorMode, setIsMirrorMode] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [fontSize, setFontSize] = useState(48);
+  const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
   
   const [isRecording, setIsRecording] = useState(false);
   const [currentText, setCurrentText] = useState('');
@@ -85,22 +87,40 @@ export default function App() {
     const savedStreaming = localStorage.getItem('use_web_speech') === 'true';
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
+    const savedFontSize = parseInt(localStorage.getItem('font_size') || '48', 10);
+    const savedVibration = localStorage.getItem('vibration_enabled') !== 'false';
     
     setApiKey(savedKey);
     setIsStreamingMode(savedStreaming);
     setIsMirrorMode(savedMirror);
     setHistory(savedHistory);
+    setFontSize(savedFontSize);
+    setIsVibrationEnabled(savedVibration);
   }, []);
 
   // Save settings when they change
-  const saveSettings = (key: string, streaming: boolean, mirror: boolean) => {
+  const saveSettings = (key: string, streaming: boolean, mirror: boolean, size: number, vibration: boolean) => {
     localStorage.setItem('openai_api_key', key);
     localStorage.setItem('use_web_speech', String(streaming));
     localStorage.setItem('mirror_mode', String(mirror));
+    localStorage.setItem('font_size', String(size));
+    localStorage.setItem('vibration_enabled', String(vibration));
     setApiKey(key);
     setIsStreamingMode(streaming);
     setIsMirrorMode(mirror);
+    setFontSize(size);
+    setIsVibrationEnabled(vibration);
   };
+
+  const triggerVibration = useCallback((pattern: number | number[]) => {
+    if (isVibrationEnabled && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(pattern);
+      } catch (e) {
+        console.error('Vibration failed', e);
+      }
+    }
+  }, [isVibrationEnabled]);
 
   const saveToHistory = (text: string) => {
     if (!text.trim()) return;
@@ -257,6 +277,7 @@ export default function App() {
     updateCurrentText('');
     setIsRecording(true);
     isRecordingRef.current = true;
+    triggerVibration(50);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -280,15 +301,18 @@ export default function App() {
         recognition.onresult = (event: any) => {
           let finalTranscript = '';
           let interimTranscript = '';
+          let hasFinal = false;
 
           for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
               finalTranscript += event.results[i][0].transcript;
+              hasFinal = true;
             } else {
               interimTranscript += event.results[i][0].transcript;
             }
           }
           updateCurrentText(finalTranscript + interimTranscript);
+          if (hasFinal) triggerVibration([100, 50, 100]);
           
           // Reset silence timer when speech is recognized
           lastAudioTimeRef.current = Date.now();
@@ -297,6 +321,7 @@ export default function App() {
 
         recognition.onerror = (event: any) => {
           console.error('Speech recognition error', event.error);
+          triggerVibration(500);
           if (event.error !== 'no-speech') {
             stopRecording();
           }
@@ -378,9 +403,11 @@ export default function App() {
       const data = await response.json();
       updateCurrentText(data.text);
       saveToHistory(data.text);
+      triggerVibration([100, 50, 100]);
     } catch (error: any) {
       console.error('Whisper API Error:', error);
       updateCurrentText(`錯誤: ${error.message}`);
+      triggerVibration(500);
     } finally {
       setIsProcessing(false);
     }
@@ -413,7 +440,7 @@ export default function App() {
             <input
               type="password"
               value={apiKey}
-              onChange={(e) => saveSettings(e.target.value, isStreamingMode, isMirrorMode)}
+              onChange={(e) => saveSettings(e.target.value, isStreamingMode, isMirrorMode, fontSize, isVibrationEnabled)}
               placeholder="sk-..."
               className="w-full p-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
             />
@@ -435,10 +462,48 @@ export default function App() {
                 type="checkbox" 
                 className="sr-only peer"
                 checked={isStreamingMode}
-                onChange={(e) => saveSettings(apiKey, e.target.checked, isMirrorMode)}
+                onChange={(e) => saveSettings(apiKey, e.target.checked, isMirrorMode, fontSize, isVibrationEnabled)}
               />
               <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div className="pr-4">
+              <h3 className="text-lg font-medium text-gray-900">觸覺回饋 (震動提示)</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                開啟後，在開始收音、辨識完成或發生錯誤時，手機會發出震動提示。(iOS 系統不支援)
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input 
+                type="checkbox" 
+                className="sr-only peer"
+                checked={isVibrationEnabled}
+                onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, fontSize, e.target.checked)}
+              />
+              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">字體大小</h3>
+              <span className="text-lg font-medium text-blue-600">{fontSize}px</span>
+            </div>
+            <input 
+              type="range" 
+              min="24" 
+              max="120" 
+              step="4"
+              value={fontSize}
+              onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, parseInt(e.target.value, 10), isVibrationEnabled)}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <div className="flex justify-between text-sm text-gray-500 mt-2">
+              <span>小</span>
+              <span>大</span>
+            </div>
           </div>
         </div>
       </div>
@@ -494,7 +559,7 @@ export default function App() {
         </button>
         
         <button 
-          onClick={() => saveSettings(apiKey, isStreamingMode, !isMirrorMode)}
+          onClick={() => saveSettings(apiKey, isStreamingMode, !isMirrorMode, fontSize, isVibrationEnabled)}
           className={`p-3 backdrop-blur-md rounded-full transition ${isMirrorMode ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
         >
           <FlipVertical className="w-8 h-8" />
@@ -514,13 +579,13 @@ export default function App() {
           <>
             {/* Top Half (Rotated 180deg for the other person) */}
             <div className="flex-1 flex items-center justify-center p-8 border-b border-gray-800 rotate-180">
-              <p className="text-[clamp(2rem,5vw,4rem)] font-medium leading-tight text-center text-blue-400">
+              <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
                 {currentText || '等待說話...'}
               </p>
             </div>
             {/* Bottom Half (Normal for the user) */}
             <div className="flex-1 flex items-center justify-center p-8">
-              <p className="text-[clamp(2rem,5vw,4rem)] font-medium leading-tight text-center text-white">
+              <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
                 {currentText || '等待說話...'}
               </p>
             </div>
@@ -528,7 +593,7 @@ export default function App() {
         ) : (
           /* Full Screen Normal */
           <div className="flex-1 flex items-center justify-center p-8">
-            <p className="text-[clamp(2.5rem,6vw,5rem)] font-medium leading-tight text-center">
+            <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
               {currentText || '點擊下方麥克風開始說話'}
             </p>
           </div>
