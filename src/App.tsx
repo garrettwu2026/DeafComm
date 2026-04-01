@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical } from 'lucide-react';
+import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share } from 'lucide-react';
 
 type View = 'main' | 'settings' | 'history';
 
@@ -15,6 +15,7 @@ export default function App() {
   const [isStreamingMode, setIsStreamingMode] = useState(false);
   const [isMirrorMode, setIsMirrorMode] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
+  const [isChatView, setIsChatView] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [fontSize, setFontSize] = useState(48);
   const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
@@ -42,6 +43,8 @@ export default function App() {
   const hasSpokenRef = useRef<boolean>(false);
   const vadStatusRef = useRef<'listening' | 'silence' | 'stopping'>('listening');
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesEndRefTop = useRef<HTMLDivElement>(null);
 
   // Ref for Screen Wake Lock
   const wakeLockRef = useRef<any>(null);
@@ -89,6 +92,7 @@ export default function App() {
     const savedStreaming = localStorage.getItem('use_web_speech') === 'true';
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
     const savedContinuous = localStorage.getItem('continuous_mode') === 'true';
+    const savedChatView = localStorage.getItem('chat_view_mode') === 'true';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
     const savedFontSize = parseInt(localStorage.getItem('font_size') || '48', 10);
     const savedVibration = localStorage.getItem('vibration_enabled') !== 'false';
@@ -98,10 +102,19 @@ export default function App() {
     setIsMirrorMode(savedMirror);
     setIsContinuousMode(savedContinuous);
     isContinuousModeRef.current = savedContinuous;
+    setIsChatView(savedChatView);
     setHistory(savedHistory);
     setFontSize(savedFontSize);
     setIsVibrationEnabled(savedVibration);
   }, []);
+
+  // Auto-scroll for chat view
+  useEffect(() => {
+    if (isChatView && view === 'main') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRefTop.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [history, currentText, isChatView, view]);
 
   // Save settings when they change
   const saveSettings = (key: string, streaming: boolean, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
@@ -146,6 +159,36 @@ export default function App() {
     if (window.confirm('確定要清除所有歷史紀錄嗎？')) {
       setHistory([]);
       localStorage.removeItem('transcription_history');
+    }
+  };
+
+  const toggleChatView = () => {
+    const newValue = !isChatView;
+    setIsChatView(newValue);
+    localStorage.setItem('chat_view_mode', String(newValue));
+  };
+
+  const exportHistory = async () => {
+    if (history.length === 0) return;
+    const textContent = history.map(item => `[${new Date(item.date).toLocaleString('zh-TW')}]\n${item.text}`).join('\n\n');
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: '聽障溝通助手 - 對話紀錄',
+          text: textContent,
+        });
+      } catch (err) {
+        console.log('Share canceled or failed:', err);
+      }
+    } else {
+      const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `對話紀錄_${new Date().toLocaleDateString('zh-TW').replace(/\//g, '')}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -395,6 +438,7 @@ export default function App() {
     formData.append('file', audioBlob, 'audio.webm');
     formData.append('model', 'whisper-1');
     formData.append('language', 'zh');
+    formData.append('prompt', '請使用繁體中文（台灣）輸出。這是一段繁體中文的語音對話。');
 
     try {
       const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -561,11 +605,18 @@ export default function App() {
             </button>
             <h1 className="text-3xl font-bold ml-4 text-gray-900">歷史紀錄</h1>
           </div>
-          {history.length > 0 && (
-            <button onClick={clearHistory} className="p-2 text-red-500 hover:bg-red-50 rounded-full transition">
-              <Trash2 className="w-8 h-8" />
-            </button>
-          )}
+          <div className="flex items-center space-x-2">
+            {history.length > 0 && (
+              <>
+                <button onClick={exportHistory} className="p-2 text-blue-500 hover:bg-blue-50 rounded-full transition">
+                  <Share className="w-8 h-8" />
+                </button>
+                <button onClick={clearHistory} className="p-2 text-red-500 hover:bg-red-50 rounded-full transition">
+                  <Trash2 className="w-8 h-8" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-4 max-w-2xl mx-auto w-full pb-10">
@@ -592,8 +643,7 @@ export default function App() {
       {/* Full-screen Breathing Light Indicator */}
       {isRecording && (
         <div className="absolute inset-0 pointer-events-none z-0">
-          <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(59,130,246,0.3)] animate-pulse"></div>
-          <div className="absolute inset-0 border-[8px] border-blue-500/30 animate-pulse rounded-lg"></div>
+          <div className="absolute inset-0 animate-rainbow-breathe rounded-lg"></div>
         </div>
       )}
 
@@ -614,6 +664,13 @@ export default function App() {
         </button>
 
         <button 
+          onClick={toggleChatView}
+          className={`p-3 backdrop-blur-md rounded-full transition ${isChatView ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
+        >
+          <MessageSquare className="w-8 h-8" />
+        </button>
+
+        <button 
           onClick={() => setView('history')}
           className="p-3 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition"
         >
@@ -623,28 +680,77 @@ export default function App() {
 
       {/* Text Display Area */}
       <div className="flex-1 flex flex-col w-full h-full pt-24 pb-32">
-        {isMirrorMode ? (
-          <>
-            {/* Top Half (Rotated 180deg for the other person) */}
-            <div className="flex-1 flex items-center justify-center p-8 border-b border-gray-800 rotate-180">
-              <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
-                {currentText || '等待說話...'}
-              </p>
+        {isChatView ? (
+          isMirrorMode ? (
+            <>
+              {/* Top Half Chat (Rotated) */}
+              <div className="flex-1 overflow-y-auto p-6 border-b border-gray-800 rotate-180 flex flex-col space-y-4">
+                {[...history].reverse().map(item => (
+                  <div key={item.id} className="bg-gray-800 rounded-2xl p-4 self-start max-w-[90%]">
+                    <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
+                  </div>
+                ))}
+                {currentText && (
+                  <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
+                    <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
+                  </div>
+                )}
+                <div ref={messagesEndRefTop} />
+              </div>
+              {/* Bottom Half Chat */}
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col space-y-4">
+                {[...history].reverse().map(item => (
+                  <div key={item.id} className="bg-gray-800 rounded-2xl p-4 self-start max-w-[90%]">
+                    <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
+                  </div>
+                ))}
+                {currentText && (
+                  <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
+                    <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col space-y-4">
+              {[...history].reverse().map(item => (
+                <div key={item.id} className="bg-gray-800 rounded-2xl p-4 self-start max-w-[90%]">
+                  <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{item.text}</p>
+                </div>
+              ))}
+              {currentText && (
+                <div className="bg-blue-600 rounded-2xl p-4 self-start max-w-[90%] animate-pulse">
+                  <p className="text-white" style={{ fontSize: `${Math.max(20, fontSize * 0.5)}px` }}>{currentText}</p>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
             </div>
-            {/* Bottom Half (Normal for the user) */}
-            <div className="flex-1 flex items-center justify-center p-8">
-              <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
-                {currentText || '等待說話...'}
-              </p>
-            </div>
-          </>
+          )
         ) : (
-          /* Full Screen Normal */
-          <div className="flex-1 flex items-center justify-center p-8">
-            <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
-              {currentText || '點擊下方麥克風開始說話'}
-            </p>
-          </div>
+          isMirrorMode ? (
+            <>
+              {/* Top Half (Rotated 180deg for the other person) */}
+              <div className="flex-1 flex items-center justify-center p-8 border-b border-gray-800 rotate-180">
+                <p className="font-medium leading-tight text-center text-blue-400" style={{ fontSize: `${fontSize}px` }}>
+                  {currentText || '等待說話...'}
+                </p>
+              </div>
+              {/* Bottom Half (Normal for the user) */}
+              <div className="flex-1 flex items-center justify-center p-8">
+                <p className="font-medium leading-tight text-center text-white" style={{ fontSize: `${fontSize}px` }}>
+                  {currentText || '等待說話...'}
+                </p>
+              </div>
+            </>
+          ) : (
+            /* Full Screen Normal */
+            <div className="flex-1 flex items-center justify-center p-8">
+              <p className="font-medium leading-tight text-center" style={{ fontSize: `${fontSize}px` }}>
+                {currentText || '點擊下方麥克風開始說話'}
+              </p>
+            </div>
+          )
         )}
       </div>
 
