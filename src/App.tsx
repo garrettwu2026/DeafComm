@@ -475,6 +475,7 @@ export default function App() {
           localStorage.removeItem('openai_api_key');
           setView('settings');
           updateCurrentText('API Key 錯誤');
+          setIsProcessing(false);
           return;
         }
         throw new Error(errMsg);
@@ -499,6 +500,7 @@ export default function App() {
       if (hallucinations.some(h => transcribedText.includes(h)) && transcribedText.length < 30) {
         console.log('Filtered Whisper hallucination:', transcribedText);
         updateCurrentText('');
+        setIsProcessing(false);
         return;
       }
 
