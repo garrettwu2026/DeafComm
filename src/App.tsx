@@ -14,6 +14,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [isStreamingMode, setIsStreamingMode] = useState(false);
   const [isMirrorMode, setIsMirrorMode] = useState(false);
+  const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [fontSize, setFontSize] = useState(48);
   const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
@@ -26,6 +27,7 @@ export default function App() {
 
   // Refs for recording and VAD
   const isRecordingRef = useRef(false);
+  const isContinuousModeRef = useRef(false);
   const currentTextRef = useRef('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -86,6 +88,7 @@ export default function App() {
     const savedKey = localStorage.getItem('openai_api_key') || '';
     const savedStreaming = localStorage.getItem('use_web_speech') === 'true';
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
+    const savedContinuous = localStorage.getItem('continuous_mode') === 'true';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
     const savedFontSize = parseInt(localStorage.getItem('font_size') || '48', 10);
     const savedVibration = localStorage.getItem('vibration_enabled') !== 'false';
@@ -93,21 +96,26 @@ export default function App() {
     setApiKey(savedKey);
     setIsStreamingMode(savedStreaming);
     setIsMirrorMode(savedMirror);
+    setIsContinuousMode(savedContinuous);
+    isContinuousModeRef.current = savedContinuous;
     setHistory(savedHistory);
     setFontSize(savedFontSize);
     setIsVibrationEnabled(savedVibration);
   }, []);
 
   // Save settings when they change
-  const saveSettings = (key: string, streaming: boolean, mirror: boolean, size: number, vibration: boolean) => {
+  const saveSettings = (key: string, streaming: boolean, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
     localStorage.setItem('openai_api_key', key);
     localStorage.setItem('use_web_speech', String(streaming));
     localStorage.setItem('mirror_mode', String(mirror));
+    localStorage.setItem('continuous_mode', String(continuous));
     localStorage.setItem('font_size', String(size));
     localStorage.setItem('vibration_enabled', String(vibration));
     setApiKey(key);
     setIsStreamingMode(streaming);
     setIsMirrorMode(mirror);
+    setIsContinuousMode(continuous);
+    isContinuousModeRef.current = continuous;
     setFontSize(size);
     setIsVibrationEnabled(vibration);
   };
@@ -146,7 +154,7 @@ export default function App() {
     currentTextRef.current = text;
   };
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback((isAutoStop = false) => {
     if (!isRecordingRef.current) return;
     setIsRecording(false);
     isRecordingRef.current = false;
@@ -167,6 +175,12 @@ export default function App() {
       recognitionRef.current.onend = null; // Prevent auto-restart
       if (currentTextRef.current) {
         saveToHistory(currentTextRef.current);
+      }
+      // If continuous mode and auto-stopped, restart after a brief delay
+      if (isAutoStop && isContinuousModeRef.current) {
+        setTimeout(() => {
+          if (!isRecordingRef.current) startRecording();
+        }, 500);
       }
     } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -242,7 +256,7 @@ export default function App() {
         
         if (hasSpokenRef.current) {
           if (silenceDuration > 2500) {
-            stopRecording();
+            stopRecording(true);
             return;
           } else if (silenceDuration > 1500) {
             currentVadStatus = 'stopping';
@@ -251,7 +265,7 @@ export default function App() {
           }
         } else {
           if (silenceDuration > 10000) {
-            stopRecording();
+            stopRecording(true);
             return;
           }
         }
@@ -355,6 +369,13 @@ export default function App() {
         mediaRecorder.onstop = async () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           await transcribeWithWhisper(audioBlob);
+          
+          // If continuous mode is on, restart recording after Whisper finishes
+          if (isContinuousModeRef.current && !isRecordingRef.current) {
+            setTimeout(() => {
+              if (!isRecordingRef.current) startRecording();
+            }, 500);
+          }
         };
 
         mediaRecorder.start();
@@ -440,7 +461,7 @@ export default function App() {
             <input
               type="password"
               value={apiKey}
-              onChange={(e) => saveSettings(e.target.value, isStreamingMode, isMirrorMode, fontSize, isVibrationEnabled)}
+              onChange={(e) => saveSettings(e.target.value, isStreamingMode, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
               placeholder="sk-..."
               className="w-full p-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
             />
@@ -462,7 +483,26 @@ export default function App() {
                 type="checkbox" 
                 className="sr-only peer"
                 checked={isStreamingMode}
-                onChange={(e) => saveSettings(apiKey, e.target.checked, isMirrorMode, fontSize, isVibrationEnabled)}
+                onChange={(e) => saveSettings(apiKey, e.target.checked, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+              />
+              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div className="pr-4">
+              <h3 className="text-lg font-medium text-gray-900">連續聆聽模式</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                開啟後，當對方講完一句話停頓時，系統會自動重新啟動麥克風繼續收音，全程不需手動按按鈕。
+                <br/><span className="text-blue-500">建議搭配「即時串流模式」使用，避免消耗過多 API 額度。</span>
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input 
+                type="checkbox" 
+                className="sr-only peer"
+                checked={isContinuousMode}
+                onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, e.target.checked, fontSize, isVibrationEnabled)}
               />
               <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
@@ -480,7 +520,7 @@ export default function App() {
                 type="checkbox" 
                 className="sr-only peer"
                 checked={isVibrationEnabled}
-                onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, fontSize, e.target.checked)}
+                onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, isContinuousMode, fontSize, e.target.checked)}
               />
               <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
@@ -497,7 +537,7 @@ export default function App() {
               max="120" 
               step="4"
               value={fontSize}
-              onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, parseInt(e.target.value, 10), isVibrationEnabled)}
+              onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, isContinuousMode, parseInt(e.target.value, 10), isVibrationEnabled)}
               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
             />
             <div className="flex justify-between text-sm text-gray-500 mt-2">
@@ -548,7 +588,15 @@ export default function App() {
 
   // Render Main View
   return (
-    <div className="min-h-screen bg-black flex flex-col text-white overflow-hidden">
+    <div className="min-h-screen bg-black flex flex-col text-white overflow-hidden relative">
+      {/* Full-screen Breathing Light Indicator */}
+      {isRecording && (
+        <div className="absolute inset-0 pointer-events-none z-0">
+          <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(59,130,246,0.3)] animate-pulse"></div>
+          <div className="absolute inset-0 border-[8px] border-blue-500/30 animate-pulse rounded-lg"></div>
+        </div>
+      )}
+
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 right-0 p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] flex justify-between items-center z-10">
         <button 
@@ -559,7 +607,7 @@ export default function App() {
         </button>
         
         <button 
-          onClick={() => saveSettings(apiKey, isStreamingMode, !isMirrorMode, fontSize, isVibrationEnabled)}
+          onClick={() => saveSettings(apiKey, isStreamingMode, !isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
           className={`p-3 backdrop-blur-md rounded-full transition ${isMirrorMode ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
         >
           <FlipVertical className="w-8 h-8" />
