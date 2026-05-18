@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share, Loader2 } from 'lucide-react';
 
 type View = 'main' | 'settings' | 'history';
+type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream';
 
 interface HistoryItem {
   id: string;
@@ -12,7 +13,7 @@ interface HistoryItem {
 export default function App() {
   const [view, setView] = useState<View>('main');
   const [apiKey, setApiKey] = useState('');
-  const [isStreamingMode, setIsStreamingMode] = useState(false);
+  const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('whisper');
   const [isMirrorMode, setIsMirrorMode] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [isChatView, setIsChatView] = useState(false);
@@ -28,13 +29,15 @@ export default function App() {
 
   // Refs for recording and VAD
   const isRecordingRef = useRef(false);
-  const recordingModeRef = useRef<'streaming' | 'ai' | null>(null);
+  const recordingModeRef = useRef<RecognitionEngine | null>(null);
   const isContinuousModeRef = useRef(false);
   const currentTextRef = useRef('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const streamIntervalRef = useRef<any>(null);
+  const isInterimProcessingRef = useRef(false);
   
   // Refs for Audio Visualizer & VAD
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -90,16 +93,16 @@ export default function App() {
   // Load settings on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('openai_api_key') || '';
-    const savedStreaming = localStorage.getItem('use_web_speech') === 'true';
     const savedMirror = localStorage.getItem('mirror_mode') === 'true';
     const savedContinuous = localStorage.getItem('continuous_mode') === 'true';
     const savedChatView = localStorage.getItem('chat_view_mode') === 'true';
     const savedHistory = JSON.parse(localStorage.getItem('transcription_history') || '[]');
     const savedFontSize = parseInt(localStorage.getItem('font_size') || '48', 10);
     const savedVibration = localStorage.getItem('vibration_enabled') !== 'false';
+    const savedEngine = localStorage.getItem('recognition_engine') || (localStorage.getItem('use_web_speech') === 'true' ? 'web-speech' : 'whisper');
     
     setApiKey(savedKey);
-    setIsStreamingMode(savedStreaming);
+    setRecognitionEngine(savedEngine as RecognitionEngine);
     setIsMirrorMode(savedMirror);
     setIsContinuousMode(savedContinuous);
     isContinuousModeRef.current = savedContinuous;
@@ -118,20 +121,23 @@ export default function App() {
   }, [history, currentText, isChatView, view]);
 
   // Save settings when they change
-  const saveSettings = (key: string, streaming: boolean, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
+  const saveSettings = (key: string, engine: RecognitionEngine, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
     // If mode changed, stop current recording to prevent state mismatch
-    if (streaming !== isStreamingMode && isRecordingRef.current) {
+    if (engine !== recognitionEngine && isRecordingRef.current) {
       stopRecording();
     }
 
     localStorage.setItem('openai_api_key', key);
-    localStorage.setItem('use_web_speech', String(streaming));
+    localStorage.setItem('recognition_engine', engine);
+    // Also save legacy flag for compatibility if needed
+    localStorage.setItem('use_web_speech', String(engine === 'web-speech'));
     localStorage.setItem('mirror_mode', String(mirror));
     localStorage.setItem('continuous_mode', String(continuous));
     localStorage.setItem('font_size', String(size));
     localStorage.setItem('vibration_enabled', String(vibration));
+    
     setApiKey(key);
-    setIsStreamingMode(streaming);
+    setRecognitionEngine(engine);
     setIsMirrorMode(mirror);
     setIsContinuousMode(continuous);
     isContinuousModeRef.current = continuous;
@@ -217,6 +223,7 @@ export default function App() {
     vadStatusRef.current = 'listening';
     
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close().catch(console.error);
     }
@@ -224,7 +231,7 @@ export default function App() {
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     
-    if (activeMode === 'streaming' && recognitionRef.current) {
+    if (activeMode === 'web-speech' && recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current.onend = null; // Prevent auto-restart
       recognitionRef.current = null;
@@ -237,7 +244,7 @@ export default function App() {
           if (!isRecordingRef.current) startRecording();
         }, 500);
       }
-    } else if (activeMode === 'ai' && mediaRecorderRef.current) {
+    } else if ((activeMode === 'whisper' || activeMode === 'whisper-stream') && mediaRecorderRef.current) {
       if (mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
         // Don't set to null immediately, let onstop handle the final blob
@@ -245,7 +252,7 @@ export default function App() {
         mediaRecorderRef.current = null;
       }
     }
-  }, [history]); // Removed isStreamingMode dependency as we use activeMode ref
+  }, [history]); // Removed recognitionEngine dependency as we use activeMode ref
 
   const setupAudioAnalysis = (stream: MediaStream) => {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -342,8 +349,8 @@ export default function App() {
   };
 
   const startRecording = async () => {
-    if (!apiKey && !isStreamingMode) {
-      alert('請先至設定輸入 OpenAI API Key，或開啟內建串流模式。');
+    if (!apiKey && recognitionEngine !== 'web-speech') {
+      alert('請先至設定輸入 OpenAI API Key，或切換為內建 Web Speech 模式。');
       setView('settings');
       return;
     }
@@ -358,7 +365,8 @@ export default function App() {
     updateCurrentText('');
     setIsRecording(true);
     isRecordingRef.current = true;
-    recordingModeRef.current = isStreamingMode ? 'streaming' : 'ai';
+    recordingModeRef.current = recognitionEngine;
+    isInterimProcessingRef.current = false;
     triggerVibration(50);
 
     try {
@@ -366,7 +374,7 @@ export default function App() {
       streamRef.current = stream;
       setupAudioAnalysis(stream);
 
-      if (isStreamingMode) {
+      if (recognitionEngine === 'web-speech') {
         // Use Web Speech API for real-time streaming
         const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -423,18 +431,70 @@ export default function App() {
         recognition.start();
 
       } else {
-        // Use MediaRecorder for Whisper API
+        // Use MediaRecorder for Whisper AI API (Single Phrase or Realtime Whisper stream)
         const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
 
-        mediaRecorder.ondataavailable = (event) => {
+        mediaRecorder.ondataavailable = async (event) => {
           if (event.data.size > 0) {
             audioChunksRef.current.push(event.data);
+            
+            // If in streaming Whisper mode, dispatch interim fetch
+            if (recognitionEngine === 'whisper-stream' && mediaRecorder.state === 'recording' && !isInterimProcessingRef.current) {
+              const currentChunks = [...audioChunksRef.current];
+              const audioBlob = new Blob(currentChunks, { type: 'audio/webm' });
+              
+              if (audioBlob.size > 1000) { // Enough data to transcribe
+                isInterimProcessingRef.current = true;
+                const interimFormData = new FormData();
+                interimFormData.append('file', audioBlob, 'interim.webm');
+                interimFormData.append('model', 'whisper-1');
+                interimFormData.append('language', 'zh');
+                interimFormData.append('prompt', '請使用繁體中文（台灣）輸出。這是一段繁體中文的語音對話。');
+
+                try {
+                  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                    body: interimFormData
+                  });
+                  if (response.ok) {
+                    const data = await response.json();
+                    let transcribedText = data.text.trim();
+
+                    const hallucinations = [
+                      '請不吝點贊訂閱轉發',
+                      '打賞支持',
+                      '明鏡與點點',
+                      '謝謝大家',
+                      '字幕由 Amara.org 社群提供',
+                      '字幕由Amara.org社区提供',
+                      '大家下次再見',
+                      '請訂閱我的頻道'
+                    ];
+
+                    if (!hallucinations.some(h => transcribedText.includes(h))) {
+                      if (transcribedText) {
+                         setCurrentText(transcribedText);
+                         currentTextRef.current = transcribedText;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.error('Interim whisper fetch failed', e);
+                } finally {
+                  isInterimProcessingRef.current = false;
+                }
+              }
+            }
           }
         };
 
         mediaRecorder.onstop = async () => {
+          // Clear interval if any
+          if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
+          
           // Only process if this is the active media recorder (or if it was just cleared by stopRecording)
           if (mediaRecorderRef.current !== mediaRecorder && mediaRecorderRef.current !== null) return;
           
@@ -456,6 +516,15 @@ export default function App() {
         };
 
         mediaRecorder.start();
+
+        // Start interval for requesting data in whisper-stream mode
+        if (recognitionEngine === 'whisper-stream') {
+          streamIntervalRef.current = setInterval(() => {
+            if (mediaRecorder.state === 'recording') {
+              mediaRecorder.requestData();
+            }
+          }, 1500); // Trigger data availability every 1.5s
+        }
       }
     } catch (err) {
       console.error('Error accessing microphone:', err);
@@ -569,7 +638,7 @@ export default function App() {
             <input
               type="password"
               value={apiKey}
-              onChange={(e) => saveSettings(e.target.value, isStreamingMode, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+              onChange={(e) => saveSettings(e.target.value, recognitionEngine, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
               placeholder="sk-..."
               className="w-full p-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
             />
@@ -578,23 +647,58 @@ export default function App() {
             </p>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-            <div className="pr-4">
-              <h3 className="text-lg font-medium text-gray-900">即時串流模式 (Web Speech)</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                開啟：文字逐字顯示，速度快。<br/>
-                關閉：使用標準模式 (Whisper API)，準確度極高且有標點符號，但需等待整句話講完。
-              </p>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">語音辨識引擎</h3>
+            
+            <div className="space-y-3">
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
+                    checked={recognitionEngine === 'whisper'}
+                    onChange={() => saveSettings(apiKey, 'whisper', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">單句模式 (Whisper AI)</span>
+                  <span className="block text-sm text-gray-500 mt-1">準確度極高，有標點符號。需等整句話講完才會顯示文字，最省資源。</span>
+                </div>
+              </label>
+
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
+                    checked={recognitionEngine === 'whisper-stream'}
+                    onChange={() => saveSettings(apiKey, 'whisper-stream', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">gpt-realtime-whisper (串流辨識)</span>
+                  <span className="block text-sm text-gray-500 mt-1">結合 Whisper 極高準確度與串流即時顯示。邊講話邊上字，會消耗較多 API 額度。</span>
+                </div>
+              </label>
+
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
+                    checked={recognitionEngine === 'web-speech'}
+                    onChange={() => saveSettings(apiKey, 'web-speech', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">內建即時串流 (Web Speech)</span>
+                  <span className="block text-sm text-gray-500 mt-1">免 API Key，文字逐字顯示速度極快，但準確度中等且無標點符號。</span>
+                </div>
+              </label>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer shrink-0">
-              <input 
-                type="checkbox" 
-                className="sr-only peer"
-                checked={isStreamingMode}
-                onChange={(e) => saveSettings(apiKey, e.target.checked, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
-              />
-              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
           </div>
 
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
@@ -610,7 +714,7 @@ export default function App() {
                 type="checkbox" 
                 className="sr-only peer"
                 checked={isContinuousMode}
-                onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, e.target.checked, fontSize, isVibrationEnabled)}
+                onChange={(e) => saveSettings(apiKey, recognitionEngine, isMirrorMode, e.target.checked, fontSize, isVibrationEnabled)}
               />
               <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
@@ -628,7 +732,7 @@ export default function App() {
                 type="checkbox" 
                 className="sr-only peer"
                 checked={isVibrationEnabled}
-                onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, isContinuousMode, fontSize, e.target.checked)}
+                onChange={(e) => saveSettings(apiKey, recognitionEngine, isMirrorMode, isContinuousMode, fontSize, e.target.checked)}
               />
               <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
@@ -645,7 +749,7 @@ export default function App() {
               max="120" 
               step="4"
               value={fontSize}
-              onChange={(e) => saveSettings(apiKey, isStreamingMode, isMirrorMode, isContinuousMode, parseInt(e.target.value, 10), isVibrationEnabled)}
+              onChange={(e) => saveSettings(apiKey, recognitionEngine, isMirrorMode, isContinuousMode, parseInt(e.target.value, 10), isVibrationEnabled)}
               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
             />
             <div className="flex justify-between text-sm text-gray-500 mt-2">
@@ -721,7 +825,7 @@ export default function App() {
         </button>
         
         <button 
-          onClick={() => saveSettings(apiKey, isStreamingMode, !isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+          onClick={() => saveSettings(apiKey, recognitionEngine, !isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
           className={`p-3 backdrop-blur-md rounded-full transition ${isMirrorMode ? 'bg-blue-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
         >
           <FlipVertical className="w-8 h-8" />
