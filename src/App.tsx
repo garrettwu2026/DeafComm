@@ -137,13 +137,9 @@ export default function App() {
     if ((isReceiverMode || isCasting) && castSessionId) {
       console.log('Initializing Socket.io...');
       
-      // Use explicit host and protocol for reliable mobile connection
-      const socket = io(window.location.origin, {
-        transports: ['websocket', 'polling'], 
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        timeout: 20000
+      // Use default settings which are most stable across environments (like Render)
+      const socket = io({
+        transports: ['polling', 'websocket'], // Polling first is safer for load balancers
       });
 
       socketRef.current = socket;
@@ -160,7 +156,7 @@ export default function App() {
       });
 
       socket.on('connect_error', (error) => {
-        console.error('⚠️ Socket Connection Error:', error);
+        console.error('⚠️ Socket Connection Error:', error.message, error);
         setIsSocketConnected(false);
       });
 
