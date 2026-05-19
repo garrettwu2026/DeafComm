@@ -1,7 +1,10 @@
 {
   "name": "聽障溝通助手 (DeafComm)",
-  "description": "專為聽障人士設計的極簡語音轉文字溝通工具，支援上下鏡像顯示與 Whisper AI。",
+  "description": "專為聽障人士設計的極簡語音轉文字溝通工具，支援上下鏡像顯示、Whisper AI 與外部螢幕 QR 連線投射。",
   "requestFramePermissions": [
     "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

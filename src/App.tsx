@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share, Loader2 } from 'lucide-react';
+import { Mic, Square, Settings, History, ArrowLeft, Trash2, FlipVertical, MessageSquare, Share, Loader2, Monitor } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
+import { QRCodeSVG } from 'qrcode.react';
 
 type View = 'main' | 'settings' | 'history';
 type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream';
@@ -21,6 +23,14 @@ export default function App() {
   const [fontSize, setFontSize] = useState(48);
   const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
   
+  // Casting states
+  const [isCasting, setIsCasting] = useState(false);
+  const [castSessionId, setCastSessionId] = useState('');
+  const [isReceiverMode, setIsReceiverMode] = useState(false);
+  const [receiverText, setReceiverText] = useState('');
+  const [showQR, setShowQR] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
+
   const [isRecording, setIsRecording] = useState(false);
   const [currentText, setCurrentText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -110,7 +120,50 @@ export default function App() {
     setHistory(savedHistory);
     setFontSize(savedFontSize);
     setIsVibrationEnabled(savedVibration);
+
+    // Check for receiver mode
+    const urlParams = new URLSearchParams(window.location.search);
+    const session = urlParams.get('session');
+    if (session) {
+      setIsReceiverMode(true);
+      setCastSessionId(session);
+    }
   }, []);
+
+  // Handle Socket Connection
+  useEffect(() => {
+    if (isReceiverMode && castSessionId) {
+      socketRef.current = io();
+      socketRef.current.on('connect', () => {
+        socketRef.current?.emit('join-room', castSessionId);
+      });
+      socketRef.current.on('receive-transcription', (data: { text: string }) => {
+        setReceiverText(data.text);
+      });
+      return () => {
+        socketRef.current?.disconnect();
+      };
+    } else if (isCasting && castSessionId) {
+      socketRef.current = io();
+      socketRef.current.on('connect', () => {
+        socketRef.current?.emit('join-room', castSessionId);
+      });
+      return () => {
+        socketRef.current?.disconnect();
+      };
+    }
+  }, [isReceiverMode, isCasting, castSessionId]);
+
+  // Sync current text to socket
+  useEffect(() => {
+    if (isCasting && socketRef.current && currentText) {
+      socketRef.current.emit('send-transcription', {
+        roomId: castSessionId,
+        text: currentText,
+        isFinal: !isProcessing
+      });
+    }
+  }, [currentText, isProcessing, isCasting, castSessionId]);
 
   // Auto-scroll for chat view and big text
   useEffect(() => {
@@ -207,6 +260,18 @@ export default function App() {
   const updateCurrentText = (text: string) => {
     setCurrentText(text);
     currentTextRef.current = text;
+  };
+
+  const toggleCasting = () => {
+    if (isCasting) {
+      setIsCasting(false);
+      setCastSessionId('');
+    } else {
+      const newSessionId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      setCastSessionId(newSessionId);
+      setIsCasting(true);
+      setShowQR(true);
+    }
   };
 
   const stopRecording = useCallback((isAutoStop = false) => {
@@ -376,7 +441,7 @@ export default function App() {
 
       if (recognitionEngine === 'web-speech') {
         // Use Web Speech API for real-time streaming
-        const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
           alert('您的瀏覽器不支援語音辨識串流，請關閉串流模式改用 Whisper。');
           stopRecording();
@@ -619,6 +684,22 @@ export default function App() {
     }
   };
 
+  // Render Receiver View
+  if (isReceiverMode) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 text-white">
+        <div className="max-w-4xl w-full text-center">
+          <p className="font-medium leading-tight select-none" style={{ fontSize: `${fontSize}px` }}>
+            {receiverText || '等待主螢幕傳送文字...'}
+          </p>
+        </div>
+        <div className="fixed bottom-6 right-6 opacity-30">
+          <span className="text-xs font-mono">Room: {castSessionId}</span>
+        </div>
+      </div>
+    );
+  }
+
   // Render Settings View
   if (view === 'settings') {
     return (
@@ -757,6 +838,24 @@ export default function App() {
               <span>大</span>
             </div>
           </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div className="pr-4">
+              <h3 className="text-lg font-medium text-gray-900">外部螢幕投射</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                開啟後，其他裝置掃描 QR Code 即可同步看到目前的對話文字。
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input 
+                type="checkbox" 
+                className="sr-only peer"
+                checked={isCasting}
+                onChange={toggleCasting}
+              />
+              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
         </div>
       </div>
     );
@@ -837,6 +936,15 @@ export default function App() {
         >
           <MessageSquare className="w-8 h-8" />
         </button>
+
+        {isCasting && (
+          <button 
+            onClick={() => setShowQR(true)}
+            className="p-3 bg-blue-500 backdrop-blur-md rounded-full text-white animate-pulse"
+          >
+            <Monitor className="w-8 h-8" />
+          </button>
+        )}
 
         <button 
           onClick={() => setView('history')}
@@ -1037,6 +1145,36 @@ export default function App() {
           )}
         </button>
       </div>
+
+      {/* QR Code Modal */}
+      {showQR && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 backdrop-blur-lg bg-black/60">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full flex flex-col items-center text-center">
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">外部螢幕投射</h3>
+            <p className="text-gray-500 mb-6 text-sm">請使用另一台裝置(如 iPad)掃描下方 QR Code 即可連線同步。</p>
+            
+            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-inner mb-6">
+              <QRCodeSVG 
+                value={`${window.location.origin}${window.location.pathname}?session=${castSessionId}`}
+                size={200}
+                level="H"
+                includeMargin={false}
+              />
+            </div>
+            
+            <div className="bg-gray-100 px-4 py-2 rounded-lg font-mono text-gray-600 mb-8 border border-gray-200">
+              Session: {castSessionId}
+            </div>
+            
+            <button 
+              onClick={() => setShowQR(false)}
+              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition"
+            >
+              關閉
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
