@@ -135,39 +135,45 @@ export default function App() {
   // Handle Socket Connection
   useEffect(() => {
     if ((isReceiverMode || isCasting) && castSessionId) {
-      // Use explicit transports and path if needed, though default usually works
-      // Added reconnection logic and status tracking
-      socketRef.current = io({
-        transports: ['polling', 'websocket'], // Start with polling, upgrade to websocket
+      console.log('Initializing Socket.io...');
+      
+      // Explicitly use current origin
+      const socket = io(window.location.origin, {
+        path: '/socket.io/',
+        transports: ['websocket', 'polling'], // Prefer WebSockets
         reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        timeout: 20000
       });
 
-      const socket = socketRef.current;
+      socketRef.current = socket;
 
       socket.on('connect', () => {
-        console.log('Socket Connected:', socket.id);
+        console.log('✅ Socket Connected:', socket.id);
         setIsSocketConnected(true);
         socket.emit('join-room', castSessionId);
       });
 
-      socket.on('disconnect', () => {
-        console.log('Socket Disconnected');
+      socket.on('disconnect', (reason) => {
+        console.warn('❌ Socket Disconnected:', reason);
         setIsSocketConnected(false);
       });
 
       socket.on('connect_error', (error) => {
-        console.error('Socket Connection Error:', error);
+        console.error('⚠️ Socket Connection Error:', error);
+        setIsSocketConnected(false);
       });
 
       if (isReceiverMode) {
         socket.on('receive-transcription', (data: { text: string }) => {
+          console.log('Received transcription from host');
           setReceiverText(data.text);
         });
       }
 
       return () => {
+        console.log('Cleaning up socket connection...');
         socket.disconnect();
         socketRef.current = null;
         setIsSocketConnected(false);
