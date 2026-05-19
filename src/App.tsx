@@ -29,7 +29,9 @@ export default function App() {
   const [isReceiverMode, setIsReceiverMode] = useState(false);
   const [receiverText, setReceiverText] = useState('');
   const [showQR, setShowQR] = useState(false);
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
+  const lastEmittedTextRef = useRef<string>('');
 
   const [isRecording, setIsRecording] = useState(false);
   const [currentText, setCurrentText] = useState('');
@@ -132,38 +134,58 @@ export default function App() {
 
   // Handle Socket Connection
   useEffect(() => {
-    if (isReceiverMode && castSessionId) {
-      socketRef.current = io();
-      socketRef.current.on('connect', () => {
-        socketRef.current?.emit('join-room', castSessionId);
+    if ((isReceiverMode || isCasting) && castSessionId) {
+      // Use explicit transports and path if needed, though default usually works
+      // Added reconnection logic and status tracking
+      socketRef.current = io({
+        transports: ['polling', 'websocket'], // Start with polling, upgrade to websocket
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000
       });
-      socketRef.current.on('receive-transcription', (data: { text: string }) => {
-        setReceiverText(data.text);
+
+      const socket = socketRef.current;
+
+      socket.on('connect', () => {
+        console.log('Socket Connected:', socket.id);
+        setIsSocketConnected(true);
+        socket.emit('join-room', castSessionId);
       });
+
+      socket.on('disconnect', () => {
+        console.log('Socket Disconnected');
+        setIsSocketConnected(false);
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('Socket Connection Error:', error);
+      });
+
+      if (isReceiverMode) {
+        socket.on('receive-transcription', (data: { text: string }) => {
+          setReceiverText(data.text);
+        });
+      }
+
       return () => {
-        socketRef.current?.disconnect();
-      };
-    } else if (isCasting && castSessionId) {
-      socketRef.current = io();
-      socketRef.current.on('connect', () => {
-        socketRef.current?.emit('join-room', castSessionId);
-      });
-      return () => {
-        socketRef.current?.disconnect();
+        socket.disconnect();
+        socketRef.current = null;
+        setIsSocketConnected(false);
       };
     }
   }, [isReceiverMode, isCasting, castSessionId]);
 
   // Sync current text to socket
   useEffect(() => {
-    if (isCasting && socketRef.current && currentText) {
+    if (isCasting && socketRef.current && isSocketConnected && currentText !== lastEmittedTextRef.current) {
       socketRef.current.emit('send-transcription', {
         roomId: castSessionId,
         text: currentText,
         isFinal: !isProcessing
       });
+      lastEmittedTextRef.current = currentText;
     }
-  }, [currentText, isProcessing, isCasting, castSessionId]);
+  }, [currentText, isProcessing, isCasting, castSessionId, isSocketConnected]);
 
   // Auto-scroll for chat view and big text
   useEffect(() => {
@@ -687,10 +709,14 @@ export default function App() {
   // Render Receiver View
   if (isReceiverMode) {
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 text-white">
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 text-white relative">
+        <div className="absolute top-6 left-6 flex items-center space-x-2 opacity-50">
+          <div className={`w-3 h-3 rounded-full ${isSocketConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+          <span className="text-xs font-mono">{isSocketConnected ? 'Connected' : 'Disconnected'}</span>
+        </div>
         <div className="max-w-4xl w-full text-center">
           <p className="font-medium leading-tight select-none" style={{ fontSize: `${fontSize}px` }}>
-            {receiverText || '等待主螢幕傳送文字...'}
+            {receiverText || (isSocketConnected ? '連線成功，等待主螢幕傳送文字...' : '正在嘗試連線到主螢幕...')}
           </p>
         </div>
         <div className="fixed bottom-6 right-6 opacity-30">
@@ -1162,8 +1188,11 @@ export default function App() {
               />
             </div>
             
-            <div className="bg-gray-100 px-4 py-2 rounded-lg font-mono text-gray-600 mb-8 border border-gray-200">
-              Session: {castSessionId}
+            <div className="flex items-center space-x-2 bg-gray-100 px-4 py-2 rounded-xl mb-8">
+              <div className={`w-2 h-2 rounded-full ${isSocketConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+              <span className="text-xs font-mono text-gray-600">
+                {isSocketConnected ? '服務已連線' : '正在連線伺服器...'}
+              </span>
             </div>
             
             <button 

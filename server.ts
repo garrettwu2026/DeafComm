@@ -26,11 +26,17 @@ async function startServer() {
 
     socket.on('join-room', (roomId) => {
       socket.join(roomId);
-      console.log(`Socket ${socket.id} joined room ${roomId}`);
+      console.log(`[Socket] ${socket.id} joined room ${roomId}`);
+      // Notify the room that someone else joined
+      socket.to(roomId).emit('peer-joined', socket.id);
     });
 
     socket.on('send-transcription', (data) => {
       // data: { roomId: string, text: string, isFinal: boolean }
+      if (!data.roomId) return;
+      
+      console.log(`[Relay] Room ${data.roomId}: "${data.text.substring(0, 20)}..."`);
+      
       socket.to(data.roomId).emit('receive-transcription', {
         text: data.text,
         isFinal: data.isFinal,
