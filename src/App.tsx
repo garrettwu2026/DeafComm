@@ -137,10 +137,9 @@ export default function App() {
     if ((isReceiverMode || isCasting) && castSessionId) {
       console.log('Initializing Socket.io...');
       
-      // Explicitly use current origin
-      const socket = io(window.location.origin, {
-        path: '/socket.io/',
-        transports: ['websocket', 'polling'], // Prefer WebSockets
+      // Using default io() call which is most robust for same-origin connections
+      const socket = io({
+        transports: ['polling', 'websocket'], // Try polling first for reliability, then upgrade
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,

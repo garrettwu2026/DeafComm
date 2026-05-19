@@ -10,11 +10,16 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: (origin, callback) => {
+        // Allows all origins in production to avoid CORS mismatch on cloud proxies
+        callback(null, true);
+      },
       methods: ["GET", "POST"],
       credentials: true
     },
-    path: '/socket.io/'
+    allowEIO3: true, // Compatibility for older clients if any
+    pingTimeout: 60000,
+    pingInterval: 25000
   });
 
   const PORT = process.env.PORT || 3000;
