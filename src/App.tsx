@@ -137,11 +137,11 @@ export default function App() {
     if ((isReceiverMode || isCasting) && castSessionId) {
       console.log('Initializing Socket.io...');
       
-      // Using default io() call which is most robust for same-origin connections
-      const socket = io({
-        transports: ['polling', 'websocket'], // Try polling first for reliability, then upgrade
+      // Use explicit host and protocol for reliable mobile connection
+      const socket = io(window.location.origin, {
+        transports: ['websocket', 'polling'], 
         reconnection: true,
-        reconnectionAttempts: Infinity,
+        reconnectionAttempts: 10,
         reconnectionDelay: 1000,
         timeout: 20000
       });

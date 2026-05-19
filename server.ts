@@ -10,14 +10,10 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: (origin, callback) => {
-        // Allows all origins in production to avoid CORS mismatch on cloud proxies
-        callback(null, true);
-      },
-      methods: ["GET", "POST"],
-      credentials: true
+      origin: "*",
+      methods: ["GET", "POST"]
     },
-    allowEIO3: true, // Compatibility for older clients if any
+    allowEIO3: true,
     pingTimeout: 60000,
     pingInterval: 25000
   });
