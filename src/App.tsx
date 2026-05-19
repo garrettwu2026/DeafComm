@@ -137,9 +137,9 @@ export default function App() {
     if ((isReceiverMode || isCasting) && castSessionId) {
       console.log('Initializing Socket.io...');
       
-      // Use default settings which are most stable across environments (like Render)
+      // Force websocket transport for Render deployment to avoid polling HTML fallback issues
       const socket = io({
-        transports: ['polling', 'websocket'], // Polling first is safer for load balancers
+        transports: ['websocket'], 
       });
 
       socketRef.current = socket;
