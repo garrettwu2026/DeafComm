@@ -136,41 +136,62 @@ export default function App() {
   useEffect(() => {
     if ((isReceiverMode || isCasting) && castSessionId) {
       console.log('Initializing Socket.io...');
+      setIsSocketConnected(false);
       
-      // Force websocket transport for Render deployment to avoid polling HTML fallback issues
-      const socket = io({
-        transports: ['websocket'], 
-      });
-
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('✅ Socket Connected:', socket.id);
-        setIsSocketConnected(true);
-        socket.emit('join-room', castSessionId);
-      });
-
-      socket.on('disconnect', (reason) => {
-        console.warn('❌ Socket Disconnected:', reason);
-        setIsSocketConnected(false);
-      });
-
-      socket.on('connect_error', (error) => {
-        console.error('⚠️ Socket Connection Error:', error.message, error);
-        setIsSocketConnected(false);
-      });
-
-      if (isReceiverMode) {
-        socket.on('receive-transcription', (data: { text: string }) => {
-          console.log('Received transcription from host');
-          setReceiverText(data.text);
+      // Check if backend API is actually running before trying websocket
+      fetch('/api/health')
+        .then(res => {
+          if (!res.ok) throw new Error('API not available');
+          return res.json();
+        })
+        .then(data => {
+          console.log('Backend health check passed:', data);
+          connectSocket();
+        })
+        .catch(err => {
+          console.error('Backend health check failed (are you running as a Static Site instead of Web Service?):', err);
+          // Still try to connect anyway, just in case
+          connectSocket();
         });
-      }
+
+      const connectSocket = () => {
+        // Use default settings which are most stable across environments (like Render)
+        const socket = io({
+          transports: ['polling', 'websocket'], // Polling first is safer for load balancers
+        });
+
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+          console.log('✅ Socket Connected:', socket.id);
+          setIsSocketConnected(true);
+          socket.emit('join-room', castSessionId);
+        });
+
+        socket.on('disconnect', (reason) => {
+          console.warn('❌ Socket Disconnected:', reason);
+          setIsSocketConnected(false);
+        });
+
+        socket.on('connect_error', (error) => {
+          console.error('⚠️ Socket Connection Error:', error.message, error);
+          setIsSocketConnected(false);
+        });
+
+        if (isReceiverMode) {
+          socket.on('receive-transcription', (data: { text: string }) => {
+            console.log('Received transcription from host');
+            setReceiverText(data.text);
+          });
+        }
+      };
 
       return () => {
         console.log('Cleaning up socket connection...');
-        socket.disconnect();
-        socketRef.current = null;
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
         setIsSocketConnected(false);
       };
     }
