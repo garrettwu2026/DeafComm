@@ -236,6 +236,8 @@ export default function App() {
         socket.on('gemini-live-status', (status: string) => {
           if (status === 'connected') {
             setIsProcessing(false);
+          } else if (status === 'disconnected') {
+            setIsProcessing(false);
           }
         });
 
@@ -398,6 +400,9 @@ export default function App() {
     const activeMode = recordingModeRef.current;
     recordingModeRef.current = null;
 
+    if (activeMode !== 'gemini-live') {
+      setIsProcessing(false);
+    }
     setAudioLevel(0);
     setVadStatus('listening');
     vadStatusRef.current = 'listening';
@@ -462,7 +467,7 @@ export default function App() {
           if (!isRecordingRef.current) startRecording();
         }, 500);
       }
-    } else if ((activeMode === 'whisper' || activeMode === 'whisper-stream') && mediaRecorderRef.current) {
+    } else if ((activeMode === 'whisper' || activeMode === 'whisper-stream' || activeMode === 'gemini-transcribe') && mediaRecorderRef.current) {
       if (mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
         // Don't set to null immediately, let onstop handle the final blob
@@ -603,6 +608,8 @@ export default function App() {
     recordingModeRef.current = recognitionEngine;
     const capturedEngine = recognitionEngine;
     isInterimProcessingRef.current = false;
+    lastAudioTimeRef.current = Date.now();
+    hasSpokenRef.current = false;
     triggerVibration(50);
 
     try {
@@ -993,11 +1000,18 @@ export default function App() {
                     }
                   },
                   {
-                    text: '你是一個聽障溝通助理。請將這段錄音精準地轉錄為繁體中文（台灣地區常用語），並在適當的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！'
+                    text: '請精準地轉錄這段錄音。你只能輸出轉錄的文字，不要包含任何指導詞或引導指令！'
                   }
                 ]
               }
-            ]
+            ],
+            systemInstruction: {
+              parts: [
+                {
+                  text: '你是一個聽障溝通助理。請將錄音精準地轉錄為繁體中文（台灣）。注意：你只能輸出轉錄得到的原始文字，絕對不能發表任何自己的對話、回答或任何引導詞！不做解釋，只做精準字面轉寫。'
+                }
+              ]
+            }
           })
         });
 
@@ -1132,7 +1146,7 @@ export default function App() {
               className="w-full p-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
             />
             <p className="text-sm text-gray-500 mt-2">
-              金鑰將加密儲存於您的設備中。用於 Gemini 3.1 Flash Live Preview 模型（具備語氣和情緒 Emoji 感知功能）。
+              金鑰將加密儲存於您的設備中。用於 Gemini 3.1 Flash Live Preview 模型。
             </p>
           </div>
 
@@ -1151,7 +1165,7 @@ export default function App() {
                   />
                 </div>
                 <div className="ml-3">
-                  <span className="block text-base font-medium text-gray-900">單句模式 (Whisper AI)</span>
+                  <span className="block text-base font-medium text-gray-900">Whisper AI 單句模式</span>
                   <span className="block text-sm text-gray-500 mt-1">準確度極高，有標點符號。需等整句話講完才會顯示文字，最省資源。</span>
                 </div>
               </label>
@@ -1167,7 +1181,7 @@ export default function App() {
                   />
                 </div>
                 <div className="ml-3">
-                  <span className="block text-base font-medium text-gray-900">gpt-realtime-whisper (串流辨識)</span>
+                  <span className="block text-base font-medium text-gray-900">GPT-realtime-whisper 串流模式</span>
                   <span className="block text-sm text-gray-500 mt-1">結合 Whisper 極高準確度與串流即時顯示。邊講話邊上字，會消耗較多 API 額度。</span>
                 </div>
               </label>
@@ -1183,9 +1197,9 @@ export default function App() {
                   />
                 </div>
                 <div className="ml-3">
-                  <span className="block text-base font-medium text-gray-900">Gemini 錄音單句模式 (語氣與情緒感知，⭐最新推薦)</span>
+                  <span className="block text-base font-medium text-gray-900">Gemini Flash 2.5 單句模式</span>
                   <span className="block text-sm text-gray-500 mt-1">
-                    按開始錄音，講完按停止後，將完整錄音送交 Gemini 進行極速語音辨識與標點符號轉換，並精準捕捉說話者情緒附上適宜 Emoji。本模式防干擾、100% 成功。
+                    按開始錄音，講完按停止後，將完整錄音送交 Gemini 進行極速語音辨識與標點符號轉換。本模式防干擾、100% 成功。
                   </span>
                 </div>
               </label>
@@ -1201,9 +1215,9 @@ export default function App() {
                   />
                 </div>
                 <div className="ml-3">
-                  <span className="block text-base font-medium text-gray-900">Gemini 3.1 Flash Live (即時串流模式)</span>
+                  <span className="block text-base font-medium text-gray-900">Gemini 3.1 Flash Live 串流模式</span>
                   <span className="block text-sm text-gray-500 mt-1">
-                    使用全新的 Gemini 3.1 Live 串流模型。不僅能即時口語轉文字，還能感知識別說話者的情緒和語音口調，並以 Emoji 貼切呈現！ (需要保持良好且穩定的網路連線)
+                    使用全新的 Gemini 3.1 Live 串流模型，即時口語轉文字！ (需要保持良好且穩定的網路連線)
                   </span>
                 </div>
               </label>
@@ -1231,7 +1245,7 @@ export default function App() {
               <h3 className="text-lg font-medium text-gray-900">連續聆聽模式</h3>
               <p className="text-sm text-gray-500 mt-1">
                 開啟後，當對方講完一句話停頓時，系統會自動重新啟動麥克風繼續收音，全程不需手動按按鈕。
-                <br/><span className="text-blue-500">建議搭配「即時串流模式」使用，避免消耗過多 API 額度。</span>
+                <br/><span className="text-blue-500">建議搭配「串流模式」使用，避免消耗過多 API 額度。</span>
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer shrink-0">

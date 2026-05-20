@@ -1,0 +1,10 @@
+     * const response = await ai.models.generateContent({
+     *  const response = await ai.models.generateContent({
+     * const response = await ai.models.generateContent({
+     * const response = await ai.models.generateContent({
+     * const response = await ai.models.generateContent({
+    generateContent: (params: types.GenerateContentParameters) => Promise<types.GenerateContentResponse>;
+     * const response = await ai.models.generateContentStream({
+    generateContentStream: (params: types.GenerateContentParameters) => Promise<AsyncGenerator<types.GenerateContentResponse>>;
+    private generateContentInternal;
+    private generateContentStreamInternal;

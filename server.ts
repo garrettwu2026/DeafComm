@@ -77,11 +77,15 @@ async function startServer() {
         const session = await ai.live.connect({
           model: 'gemini-3.1-flash-live-preview',
           config: {
-            responseModalities: [Modality.TEXT],
-            systemInstruction: '你是一個聽障溝通助理。你的任務是將說話者的語音精準地轉錄為文字（繁體中文），同時感知說話者的語氣與情緒，並在合適的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji（例如開心用😊、生氣用😠、悲傷用😭、驚訝用😮、疑惑用🤔等）。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！只做精準字面轉寫並加上情緒 Emoji。'
+            responseModalities: [Modality.AUDIO],
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            systemInstruction: '你是一個聽障溝通助理。你的任務是將說話者的語音精準地轉錄為文字（繁體中文）。注意：你只能輸出轉錄的文字，絕對不能發表任何自己的對話或回答！只做精準字面轉寫。'
           },
           callbacks: {
             onmessage: (message) => {
+              console.log('[Gemini Live Incoming]', JSON.stringify(message));
+              
               // 1. Process real-time user input transcription (immediate feedback)
               const inputTrans = message.serverContent?.inputTranscription;
               if (inputTrans && inputTrans.text) {
@@ -102,7 +106,7 @@ async function startServer() {
                 }
               }
 
-              // 2. Process real-time model output transcription (refined with emotion analysis and emoji)
+              // 2. Process real-time model output transcription
               const outputTrans = message.serverContent?.outputTranscription;
               if (outputTrans && outputTrans.text) {
                 accumulatedText += outputTrans.text;
@@ -150,22 +154,23 @@ async function startServer() {
                 const finalReportText = accumulatedText || lastInputText || '';
                 console.log(`[Gemini Live] Turn complete. Final text: "${finalReportText}"`);
 
-                socket.emit('gemini-live-chunk', {
-                  text: finalReportText,
-                  isFinal: true
-                });
-
-                if (roomId) {
-                  io.to(roomId).emit('receive-transcription', {
-                    text: finalReportText,
-                    isFinal: true,
-                    timestamp: Date.now()
-                  });
-                }
-
                 if (finalReportText.trim()) {
+                  socket.emit('gemini-live-chunk', {
+                    text: finalReportText,
+                    isFinal: true
+                  });
+
+                  if (roomId) {
+                    io.to(roomId).emit('receive-transcription', {
+                      text: finalReportText,
+                      isFinal: true,
+                      timestamp: Date.now()
+                    });
+                  }
+
                   socket.emit('gemini-live-final', finalReportText);
                 }
+                
                 accumulatedText = ''; // Reset
                 lastInputText = '';   // Reset
               }
@@ -212,12 +217,24 @@ async function startServer() {
       const session = activeGeminiSessions.get(socket.id);
       if (session) {
         try {
-          session.close();
-        } catch (e) {}
-        activeGeminiSessions.delete(socket.id);
+          // Send client Content turnComplete to trigger final generation turn
+          session.send({ clientContent: { turnComplete: true } });
+        } catch (e) {
+          console.error('[Gemini] Error sending turnComplete:', e);
+        }
+        
+        // Wait briefly for the model to output final transcription, then close
+        setTimeout(() => {
+          try {
+            session.close();
+          } catch (e) {}
+          activeGeminiSessions.delete(socket.id);
+          socket.emit('gemini-live-status', 'disconnected');
+          console.log(`[Gemini] Live session stopped for socket ${socket.id}`);
+        }, 5000);
+      } else {
+        socket.emit('gemini-live-status', 'disconnected');
       }
-      socket.emit('gemini-live-status', 'disconnected');
-      console.log(`[Gemini] Live session stopped for socket ${socket.id}`);
     });
 
     socket.on('disconnect', (reason) => {
@@ -262,8 +279,11 @@ async function startServer() {
               mimeType: mimeType || 'audio/webm'
             }
           },
-          '你是一個聽障溝通助理。請將這段錄音精準地轉錄為繁體中文（台灣地區常用語），並在適當的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！'
-        ]
+          '請精準地轉錄這段錄音。你只能輸出轉錄的文字，不要包含任何指導詞或引導指令！'
+        ],
+        config: {
+          systemInstruction: '你是一個聽障溝通助理。請將錄音精準地轉錄為繁體中文（台灣）。注意：你只能輸出轉錄得到的原始文字，絕對不能發表任何自己的對話、回答或任何引導詞！不做解釋，只做精準字面轉寫。'
+        }
       });
 
       const text = response.text || '';
