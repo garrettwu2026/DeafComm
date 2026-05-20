@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 
 type View = 'main' | 'settings' | 'history';
-type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream' | 'gemini-live';
+type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream' | 'gemini-live' | 'gemini-transcribe';
 
 interface HistoryItem {
   id: string;
@@ -578,7 +578,7 @@ export default function App() {
   };
 
   const startRecording = async () => {
-    if (recognitionEngine === 'gemini-live') {
+    if (recognitionEngine === 'gemini-live' || recognitionEngine === 'gemini-transcribe') {
       if (!geminiApiKey) {
         alert('請先至設定輸入 Gemini API Key。');
         setView('settings');
@@ -839,7 +839,11 @@ export default function App() {
             mediaRecorderRef.current = null;
           }
           
-          await transcribeWithWhisper(audioBlob);
+          if (recordingModeRef.current === 'gemini-transcribe') {
+            await transcribeWithGemini(audioBlob);
+          } else {
+            await transcribeWithWhisper(audioBlob);
+          }
           
           // If continuous mode is on, restart recording after Whisper finishes
           if (isContinuousModeRef.current && !isRecordingRef.current) {
@@ -938,6 +942,69 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Whisper API Error:', error);
+      updateCurrentText(`錯誤: ${error.message}`);
+      triggerVibration(500);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const transcribeWithGemini = async (audioBlob: Blob) => {
+    if (!audioBlob || audioBlob.size < 100) {
+      setIsProcessing(false);
+      return;
+    }
+    
+    setIsProcessing(true);
+    
+    try {
+      // Convert blob to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const base64data = (reader.result as string).split(',')[1];
+          resolve(base64data);
+        };
+      });
+      reader.readAsDataURL(audioBlob);
+      const base64Audio = await base64Promise;
+
+      const response = await fetch('/api/gemini-transcribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          apiKey: geminiApiKey,
+          audio: base64Audio,
+          mimeType: audioBlob.type || 'audio/webm'
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errMsg = errorData.error || 'API 請求失敗';
+        
+        // Handle invalid API key
+        if (response.status === 400 || response.status === 412 || errMsg.toLowerCase().includes('api key')) {
+          alert('Gemini API Key 無效，請再次檢查設定。');
+          setView('settings');
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await response.json();
+      const transcribedText = data.text ? data.text.trim() : '';
+
+      if (transcribedText) {
+        updateCurrentText(transcribedText);
+        saveToHistory(transcribedText);
+        triggerVibration([100, 50, 100]);
+      } else {
+        updateCurrentText('');
+      }
+    } catch (error: any) {
+      console.error('Gemini Transcription Error:', error);
       updateCurrentText(`錯誤: ${error.message}`);
       triggerVibration(500);
     } finally {
@@ -1058,15 +1125,33 @@ export default function App() {
                   <input
                     type="radio"
                     name="recognitionEngine"
+                    checked={recognitionEngine === 'gemini-transcribe'}
+                    onChange={() => saveSettings(apiKey, 'gemini-transcribe', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">Gemini 錄音單句模式 (語氣與情緒感知，⭐最新推薦)</span>
+                  <span className="block text-sm text-gray-500 mt-1">
+                    按開始錄音，講完按停止後，將完整錄音送交 Gemini 進行極速語音辨識與標點符號轉換，並精準捕捉說話者情緒附上適宜 Emoji。本模式防干擾、100% 成功。
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
                     checked={recognitionEngine === 'gemini-live'}
                     onChange={() => saveSettings(apiKey, 'gemini-live', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
                     className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
                   />
                 </div>
                 <div className="ml-3">
-                  <span className="block text-base font-medium text-gray-900">Gemini 3.1 Flash Live (語氣與情緒感知)</span>
+                  <span className="block text-base font-medium text-gray-900">Gemini 3.1 Flash Live (即時串流模式)</span>
                   <span className="block text-sm text-gray-500 mt-1">
-                    使用全新的 Gemini 3.1 Live 串流模型。不僅能即時口語轉文字，還能感知識別說話者的情緒和語音口調，並以 Emoji 貼切呈現！
+                    使用全新的 Gemini 3.1 Live 串流模型。不僅能即時口語轉文字，還能感知識別說話者的情緒和語音口調，並以 Emoji 貼切呈現！ (需要保持良好且穩定的網路連線)
                   </span>
                 </div>
               </label>

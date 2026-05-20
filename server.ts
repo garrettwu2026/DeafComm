@@ -8,6 +8,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 
 async function startServer() {
   const app = express();
+  app.use(express.json({ limit: '50mb' }));
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
@@ -76,16 +77,7 @@ async function startServer() {
         const session = await ai.live.connect({
           model: 'gemini-3.1-flash-live-preview',
           config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: 'Aoede'
-                }
-              }
-            },
-            inputAudioTranscription: {},
-            outputAudioTranscription: {},
+            responseModalities: [Modality.TEXT],
             systemInstruction: '你是一個聽障溝通助理。你的任務是將說話者的語音精準地轉錄為文字（繁體中文），同時感知說話者的語氣與情緒，並在合適的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji（例如開心用😊、生氣用😠、悲傷用😭、驚訝用😮、疑惑用🤔等）。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！只做精準字面轉寫並加上情緒 Emoji。'
           },
           callbacks: {
@@ -238,6 +230,48 @@ async function startServer() {
         activeGeminiSessions.delete(socket.id);
       }
     });
+  });
+
+  // Gemini standard REST transcription route (Highly reliable single-phrase mode)
+  app.post('/api/gemini-transcribe', async (req, res) => {
+    const { apiKey, audio, mimeType } = req.body;
+
+    if (!apiKey) {
+      return res.status(400).json({ error: '缺少 Gemini API Key' });
+    }
+    if (!audio) {
+      return res.status(400).json({ error: '缺少音訊資料' });
+    }
+
+    try {
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            inlineData: {
+              data: audio,
+              mimeType: mimeType || 'audio/webm'
+            }
+          },
+          '你是一個聽障溝通助理。請將這段錄音精準地轉錄為繁體中文（台灣地區常用語），並在適當的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！'
+        ]
+      });
+
+      const text = response.text || '';
+      res.json({ text: text.trim() });
+    } catch (err: any) {
+      console.error('[Gemini Transcribe Error]:', err);
+      res.status(500).json({ error: err.message || '語音轉錄失敗' });
+    }
   });
 
   // Health check for monitoring
