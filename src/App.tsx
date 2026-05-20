@@ -475,7 +475,17 @@ export default function App() {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
 
-    const audioCtx = new AudioContextClass();
+    let audioCtx: AudioContext;
+    try {
+      audioCtx = new AudioContextClass();
+    } catch (e) {
+      console.error('Failed to create AudioContext', e);
+      return;
+    }
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(console.error);
+    }
     const analyser = audioCtx.createAnalyser();
     const source = audioCtx.createMediaStreamSource(stream);
     source.connect(analyser);
@@ -609,13 +619,48 @@ export default function App() {
           return;
         }
 
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+        const audioCtx = audioContextRef.current;
+        if (!audioCtx) {
+          alert('語音系統初始化失敗。');
+          stopRecording();
+          return;
+        }
+
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume().catch(console.error);
+        }
+
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
         source.connect(processor);
         processor.connect(audioCtx.destination);
+
+        const downsampleBuffer = (buffer: Float32Array, inputSampleRate: number, outputSampleRate: number): Float32Array => {
+          if (inputSampleRate === outputSampleRate) {
+            return buffer;
+          }
+          if (inputSampleRate < outputSampleRate) {
+            return buffer;
+          }
+          const sampleRateRatio = inputSampleRate / outputSampleRate;
+          const newLength = Math.round(buffer.length / sampleRateRatio);
+          const result = new Float32Array(newLength);
+          let offsetResult = 0;
+          let offsetBuffer = 0;
+          while (offsetResult < result.length && offsetBuffer < buffer.length) {
+            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+            let accum = 0, count = 0;
+            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+              accum += buffer[i];
+              count++;
+            }
+            result[offsetResult] = count > 0 ? accum / count : 0;
+            offsetResult++;
+            offsetBuffer = nextOffsetBuffer;
+          }
+          return result;
+        };
 
         const floatTo16BitPCM = (input: Float32Array): ArrayBuffer => {
           const buffer = new ArrayBuffer(input.length * 2);
@@ -641,7 +686,9 @@ export default function App() {
         processor.onaudioprocess = (e) => {
           if (!isRecordingRef.current) return;
           const inputData = e.inputBuffer.getChannelData(0);
-          const pcmBuffer = floatTo16BitPCM(inputData);
+          
+          const downsampled = downsampleBuffer(inputData, audioCtx.sampleRate, 16000);
+          const pcmBuffer = floatTo16BitPCM(downsampled);
           const base64 = arrayBufferToBase64(pcmBuffer);
           
           if (socketRef.current && isSocketConnected) {
