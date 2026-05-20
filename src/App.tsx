@@ -601,6 +601,7 @@ export default function App() {
     setIsRecording(true);
     isRecordingRef.current = true;
     recordingModeRef.current = recognitionEngine;
+    const capturedEngine = recognitionEngine;
     isInterimProcessingRef.current = false;
     triggerVibration(50);
 
@@ -839,7 +840,7 @@ export default function App() {
             mediaRecorderRef.current = null;
           }
           
-          if (recordingModeRef.current === 'gemini-transcribe') {
+          if (capturedEngine === 'gemini-transcribe') {
             await transcribeWithGemini(audioBlob);
           } else {
             await transcribeWithWhisper(audioBlob);
