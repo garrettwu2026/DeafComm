@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 
 type View = 'main' | 'settings' | 'history';
-type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream';
+type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream' | 'gemini-live';
 
 interface HistoryItem {
   id: string;
@@ -12,9 +12,36 @@ interface HistoryItem {
   date: number;
 }
 
+const GEMINI_SALT = "DeafCommGeminiShield2026";
+function encryptKey(text: string): string {
+  if (!text) return "";
+  let result = "";
+  for (let i = 0; i < text.length; i++) {
+    const charCode = text.charCodeAt(i) ^ GEMINI_SALT.charCodeAt(i % GEMINI_SALT.length);
+    result += String.fromCharCode(charCode);
+  }
+  return btoa(unescape(encodeURIComponent(result)));
+}
+
+function decryptKey(encoded: string): string {
+  if (!encoded) return "";
+  try {
+    const text = decodeURIComponent(escape(atob(encoded)));
+    let result = "";
+    for (let i = 0; i < text.length; i++) {
+      const charCode = text.charCodeAt(i) ^ GEMINI_SALT.charCodeAt(i % GEMINI_SALT.length);
+      result += String.fromCharCode(charCode);
+    }
+    return result;
+  } catch (e) {
+    return "";
+  }
+}
+
 export default function App() {
   const [view, setView] = useState<View>('main');
   const [apiKey, setApiKey] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
   const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('whisper');
   const [isMirrorMode, setIsMirrorMode] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(false);
@@ -113,7 +140,11 @@ export default function App() {
     const savedVibration = localStorage.getItem('vibration_enabled') !== 'false';
     const savedEngine = localStorage.getItem('recognition_engine') || (localStorage.getItem('use_web_speech') === 'true' ? 'web-speech' : 'whisper');
     
+    const savedGeminiRaw = localStorage.getItem('gemini_api_key') || '';
+    const savedGemini = decryptKey(savedGeminiRaw);
+
     setApiKey(savedKey);
+    setGeminiApiKey(savedGemini);
     setRecognitionEngine(savedEngine as RecognitionEngine);
     setIsMirrorMode(savedMirror);
     setIsContinuousMode(savedContinuous);
@@ -134,7 +165,8 @@ export default function App() {
 
   // Handle Socket Connection
   useEffect(() => {
-    if ((isReceiverMode || isCasting) && castSessionId) {
+    const needsSocket = isReceiverMode || isCasting || recognitionEngine === 'gemini-live';
+    if (needsSocket) {
       console.log('Initializing Socket.io...');
       setIsSocketConnected(false);
       
@@ -165,7 +197,9 @@ export default function App() {
         socket.on('connect', () => {
           console.log('✅ Socket Connected:', socket.id);
           setIsSocketConnected(true);
-          socket.emit('join-room', castSessionId);
+          if (isReceiverMode || isCasting) {
+            socket.emit('join-room', castSessionId);
+          }
         });
 
         socket.on('disconnect', (reason) => {
@@ -184,6 +218,32 @@ export default function App() {
             setReceiverText(data.text);
           });
         }
+
+        // Gemini 3.1 Live Listeners
+        socket.on('gemini-live-chunk', (data: { text: string, isFinal: boolean }) => {
+          updateCurrentText(data.text);
+          setIsProcessing(!data.isFinal);
+        });
+
+        socket.on('gemini-live-final', (text: string) => {
+          if (text.trim()) {
+            saveToHistory(text);
+            triggerVibration([100, 50, 100]);
+          }
+        });
+
+        socket.on('gemini-live-status', (status: string) => {
+          if (status === 'connected') {
+            setIsProcessing(false);
+          }
+        });
+
+        socket.on('gemini-live-error', (errorMsg: string) => {
+          updateCurrentText(`語音診斷錯誤: ${errorMsg}`);
+          setIsProcessing(false);
+          triggerVibration(500);
+          stopRecording();
+        });
       };
 
       return () => {
@@ -195,7 +255,7 @@ export default function App() {
         setIsSocketConnected(false);
       };
     }
-  }, [isReceiverMode, isCasting, castSessionId]);
+  }, [isReceiverMode, isCasting, castSessionId, recognitionEngine]);
 
   // Sync current text to socket
   useEffect(() => {
@@ -218,7 +278,15 @@ export default function App() {
   }, [history, currentText, isChatView, view]);
 
   // Save settings when they change
-  const saveSettings = (key: string, engine: RecognitionEngine, mirror: boolean, continuous: boolean, size: number, vibration: boolean) => {
+  const saveSettings = (
+    key: string,
+    engine: RecognitionEngine,
+    mirror: boolean,
+    continuous: boolean,
+    size: number,
+    vibration: boolean,
+    gKey: string = geminiApiKey
+  ) => {
     // If mode changed, stop current recording to prevent state mismatch
     if (engine !== recognitionEngine && isRecordingRef.current) {
       stopRecording();
@@ -232,6 +300,7 @@ export default function App() {
     localStorage.setItem('continuous_mode', String(continuous));
     localStorage.setItem('font_size', String(size));
     localStorage.setItem('vibration_enabled', String(vibration));
+    localStorage.setItem('gemini_api_key', encryptKey(gKey));
     
     setApiKey(key);
     setRecognitionEngine(engine);
@@ -240,6 +309,7 @@ export default function App() {
     isContinuousModeRef.current = continuous;
     setFontSize(size);
     setIsVibrationEnabled(vibration);
+    setGeminiApiKey(gKey);
   };
 
   const triggerVibration = useCallback((pattern: number | number[]) => {
@@ -353,6 +423,44 @@ export default function App() {
           if (!isRecordingRef.current) startRecording();
         }, 500);
       }
+    } else if (activeMode === 'gemini-live') {
+      if (socketRef.current && isSocketConnected) {
+        socketRef.current.emit('stop-gemini-live');
+      }
+
+      // Cleanup Gemini specific browser audio nodes
+      const win = window as any;
+      if (win.__geminiProcessor) {
+        try {
+          win.__geminiProcessor.disconnect();
+        } catch (e) {}
+        win.__geminiProcessor.onaudioprocess = null;
+        delete win.__geminiProcessor;
+      }
+      if (win.__geminiSource) {
+        try {
+          win.__geminiSource.disconnect();
+        } catch (e) {}
+        delete win.__geminiSource;
+      }
+      if (win.__geminiAudioContext) {
+        try {
+          if (win.__geminiAudioContext.state !== 'closed') {
+            win.__geminiAudioContext.close();
+          }
+        } catch (e) {}
+        delete win.__geminiAudioContext;
+      }
+
+      if (currentTextRef.current) {
+        saveToHistory(currentTextRef.current);
+      }
+
+      if (isAutoStop && isContinuousModeRef.current) {
+        setTimeout(() => {
+          if (!isRecordingRef.current) startRecording();
+        }, 500);
+      }
     } else if ((activeMode === 'whisper' || activeMode === 'whisper-stream') && mediaRecorderRef.current) {
       if (mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
@@ -458,7 +566,13 @@ export default function App() {
   };
 
   const startRecording = async () => {
-    if (!apiKey && recognitionEngine !== 'web-speech') {
+    if (recognitionEngine === 'gemini-live') {
+      if (!geminiApiKey) {
+        alert('請先至設定輸入 Gemini API Key。');
+        setView('settings');
+        return;
+      }
+    } else if (!apiKey && recognitionEngine !== 'web-speech') {
       alert('請先至設定輸入 OpenAI API Key，或切換為內建 Web Speech 模式。');
       setView('settings');
       return;
@@ -483,7 +597,64 @@ export default function App() {
       streamRef.current = stream;
       setupAudioAnalysis(stream);
 
-      if (recognitionEngine === 'web-speech') {
+      if (recognitionEngine === 'gemini-live') {
+        if (socketRef.current && isSocketConnected) {
+          socketRef.current.emit('start-gemini-live', {
+            apiKey: geminiApiKey,
+            roomId: isCasting ? castSessionId : null
+          });
+        } else {
+          alert('伺服器未連線，請稍後再試。');
+          stopRecording();
+          return;
+        }
+
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+        const source = audioCtx.createMediaStreamSource(stream);
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+
+        const floatTo16BitPCM = (input: Float32Array): ArrayBuffer => {
+          const buffer = new ArrayBuffer(input.length * 2);
+          const view = new DataView(buffer);
+          let offset = 0;
+          for (let i = 0; i < input.length; i++, offset += 2) {
+            let s = Math.max(-1, Math.min(1, input[i]));
+            view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+          }
+          return buffer;
+        };
+
+        const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+          let binary = '';
+          const bytes = new Uint8Array(buffer);
+          const len = bytes.byteLength;
+          for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          return window.btoa(binary);
+        };
+
+        processor.onaudioprocess = (e) => {
+          if (!isRecordingRef.current) return;
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmBuffer = floatTo16BitPCM(inputData);
+          const base64 = arrayBufferToBase64(pcmBuffer);
+          
+          if (socketRef.current && isSocketConnected) {
+            socketRef.current.emit('gemini-audio', base64);
+          }
+        };
+
+        const win = window as any;
+        win.__geminiAudioContext = audioCtx;
+        win.__geminiProcessor = processor;
+        win.__geminiSource = source;
+
+      } else if (recognitionEngine === 'web-speech') {
         // Use Web Speech API for real-time streaming
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -777,6 +948,22 @@ export default function App() {
           </div>
 
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <label className="block text-lg font-medium text-gray-700 mb-2">
+              Gemini API Key
+            </label>
+            <input
+              type="password"
+              value={geminiApiKey}
+              onChange={(e) => saveSettings(apiKey, recognitionEngine, isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled, e.target.value)}
+              placeholder="AIzaSy..."
+              className="w-full p-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+            />
+            <p className="text-sm text-gray-500 mt-2">
+              金鑰將加密儲存於您的設備中。用於 Gemini 3.1 Flash Live Preview 模型（具備語氣和情緒 Emoji 感知功能）。
+            </p>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
             <h3 className="text-lg font-medium text-gray-900 mb-4">語音辨識引擎</h3>
             
             <div className="space-y-3">
@@ -809,6 +996,24 @@ export default function App() {
                 <div className="ml-3">
                   <span className="block text-base font-medium text-gray-900">gpt-realtime-whisper (串流辨識)</span>
                   <span className="block text-sm text-gray-500 mt-1">結合 Whisper 極高準確度與串流即時顯示。邊講話邊上字，會消耗較多 API 額度。</span>
+                </div>
+              </label>
+
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
+                    checked={recognitionEngine === 'gemini-live'}
+                    onChange={() => saveSettings(apiKey, 'gemini-live', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">Gemini 3.1 Flash Live (語氣與情緒感知)</span>
+                  <span className="block text-sm text-gray-500 mt-1">
+                    使用全新的 Gemini 3.1 Live 串流模型。不僅能即時口語轉文字，還能感知識別說話者的情緒和語音口調，並以 Emoji 貼切呈現！
+                  </span>
                 </div>
               </label>
 
