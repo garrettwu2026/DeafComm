@@ -969,32 +969,83 @@ export default function App() {
       reader.readAsDataURL(audioBlob);
       const base64Audio = await base64Promise;
 
-      const response = await fetch('/api/gemini-transcribe', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          apiKey: geminiApiKey,
-          audio: base64Audio,
-          mimeType: audioBlob.type || 'audio/webm'
-        })
-      });
+      let transcribedText = '';
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        const errMsg = errorData.error || 'API 請求失敗';
-        
-        // Handle invalid API key
-        if (response.status === 400 || response.status === 412 || errMsg.toLowerCase().includes('api key')) {
-          alert('Gemini API Key 無效，請再次檢查設定。');
-          setView('settings');
+      // Try Direct Client-side API request first (ensures 100% reliability on Render.com,
+      // bypasses sleeping backend servers, and works even on Render's Static Sites)
+      try {
+        console.log('Attempting direct client-side Gemini transcription...');
+        const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+        const directResponse = await fetch(directUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: audioBlob.type || 'audio/webm',
+                      data: base64Audio
+                    }
+                  },
+                  {
+                    text: '你是一個聽障溝通助理。請將這段錄音精準地轉錄為繁體中文（台灣地區常用語），並在適當的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！'
+                  }
+                ]
+              }
+            ]
+          })
+        });
+
+        if (directResponse.ok) {
+          const directData = await directResponse.json();
+          // Extract the generated text from Gemini Response Structure
+          const candidateText = directData.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (candidateText) {
+            transcribedText = candidateText.trim();
+            console.log('✅ Client-side Gemini transcription successful:', transcribedText);
+          }
+        } else {
+          const errMsg = await directResponse.text();
+          console.warn('Direct client-side API failed, falling back to server route. Response:', errMsg);
         }
-        throw new Error(errMsg);
+      } catch (directErr) {
+        console.warn('Direct client-side fetch encountered an error, falling back to server route:', directErr);
       }
 
-      const data = await response.json();
-      const transcribedText = data.text ? data.text.trim() : '';
+      // Fallback: If client-side failed or returned empty (such as due to CORS/Adblockers), try the backend proxy route
+      if (!transcribedText) {
+        console.log('Attempting server-side fallback route...');
+        const response = await fetch('/api/gemini-transcribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            apiKey: geminiApiKey,
+            audio: base64Audio,
+            mimeType: audioBlob.type || 'audio/webm'
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          const errMsg = errorData.error || 'API 請求失敗';
+          
+          // Handle invalid API key
+          if (response.status === 400 || response.status === 412 || errMsg.toLowerCase().includes('api key')) {
+            alert('Gemini API Key 無效，請再次檢查設定。');
+            setView('settings');
+          }
+          throw new Error(errMsg);
+        }
+
+        const data = await response.json();
+        transcribedText = data.text ? data.text.trim() : '';
+      }
 
       if (transcribedText) {
         updateCurrentText(transcribedText);
