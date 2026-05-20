@@ -81,6 +81,7 @@ export default function App() {
   // Refs for Audio Visualizer & VAD
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const lastAudioTimeRef = useRef<number>(Date.now());
   const hasSpokenRef = useRef<boolean>(false);
@@ -493,6 +494,7 @@ export default function App() {
     
     audioContextRef.current = audioCtx;
     analyserRef.current = analyser;
+    sourceNodeRef.current = source;
     lastAudioTimeRef.current = Date.now();
     hasSpokenRef.current = false;
 
@@ -630,7 +632,12 @@ export default function App() {
           await audioCtx.resume().catch(console.error);
         }
 
-        const source = audioCtx.createMediaStreamSource(stream);
+        const source = sourceNodeRef.current;
+        if (!source) {
+          alert('語音來源初始化失敗。');
+          stopRecording();
+          return;
+        }
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
         source.connect(processor);
@@ -1237,14 +1244,23 @@ export default function App() {
           <MessageSquare className="w-8 h-8" />
         </button>
 
-        {isCasting && (
-          <button 
-            onClick={() => setShowQR(true)}
-            className="p-3 bg-blue-500 backdrop-blur-md rounded-full text-white animate-pulse"
-          >
-            <Monitor className="w-8 h-8" />
-          </button>
-        )}
+        <button 
+          onClick={isCasting ? () => setShowQR(true) : toggleCasting}
+          className={`p-3 backdrop-blur-md rounded-full transition group relative ${
+            isCasting 
+              ? 'bg-blue-500 text-white animate-pulse shadow-[0_0_15px_rgba(59,130,246,0.5)]' 
+              : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'
+          }`}
+          title="外部螢幕投射"
+        >
+          <Monitor className="w-8 h-8" />
+          {isCasting && (
+            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+            </span>
+          )}
+        </button>
 
         <button 
           onClick={() => setView('history')}
@@ -1469,12 +1485,23 @@ export default function App() {
               </span>
             </div>
             
-            <button 
-              onClick={() => setShowQR(false)}
-              className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition"
-            >
-              關閉
-            </button>
+            <div className="flex space-x-3 w-full">
+              <button 
+                onClick={() => {
+                  toggleCasting();
+                  setShowQR(false);
+                }}
+                className="flex-1 py-4 bg-red-100 text-red-600 rounded-2xl font-bold hover:bg-red-200 transition"
+              >
+                停止投射
+              </button>
+              <button 
+                onClick={() => setShowQR(false)}
+                className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition"
+              >
+                關閉
+              </button>
+            </div>
           </div>
         </div>
       )}
