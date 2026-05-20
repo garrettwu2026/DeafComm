@@ -75,7 +75,14 @@ async function startServer() {
         const session = await ai.live.connect({
           model: 'gemini-3.1-flash-live-preview',
           config: {
-            responseModalities: [Modality.TEXT],
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: 'Aoede'
+                }
+              }
+            },
             systemInstruction: '你是一個聽障溝通助理。你的任務是將說話者的語音精準地轉錄為文字（繁體中文），同時感知說話者的語氣與情緒，並在合適的地方（例如句尾或語氣轉折處）加上最能呈現該情緒的 Emoji（例如開心用😊、生氣用😠、悲傷用😭、驚訝用😮、疑惑用🤔等）。注意：你只能輸出轉錄的文字和情緒 Emoji，絕對不能發表任何自己的對話或回答！只做精準字面轉寫並加上情緒 Emoji。'
           },
           callbacks: {
