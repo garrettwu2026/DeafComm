@@ -467,7 +467,7 @@ export default function App() {
           if (!isRecordingRef.current) startRecording();
         }, 500);
       }
-    } else if ((activeMode === 'whisper' || activeMode === 'whisper-stream' || activeMode === 'gemini-transcribe') && mediaRecorderRef.current) {
+    } else if (mediaRecorderRef.current) {
       if (mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
         // Don't set to null immediately, let onstop handle the final blob
@@ -930,6 +930,25 @@ export default function App() {
 
         if (fallbackResponse.ok) {
           response = fallbackResponse;
+        } else {
+          console.warn(`Alt model ${altModel} failed (${fallbackResponse.status}), falling back to whisper-1...`);
+          const whisperFormData = new FormData();
+          whisperFormData.append('file', audioBlob, 'audio.webm');
+          whisperFormData.append('model', 'whisper-1');
+          whisperFormData.append('language', 'zh');
+          whisperFormData.append('prompt', '請使用繁體中文（台灣）輸出。這是一段繁體中文的語音對話。');
+
+          const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: whisperFormData
+          });
+
+          if (whisperResponse.ok) {
+            response = whisperResponse;
+          }
         }
       }
 
