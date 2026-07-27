@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 
 type View = 'main' | 'settings' | 'history';
-type RecognitionEngine = 'web-speech' | 'whisper' | 'whisper-stream' | 'gemini-live' | 'gemini-transcribe';
+type RecognitionEngine = 'web-speech' | 'whisper' | 'gpt-4o-mini-transcribe' | 'gpt-4o-transcribe' | 'whisper-stream' | 'gemini-live' | 'gemini-transcribe';
 
 interface HistoryItem {
   id: string;
@@ -850,7 +850,7 @@ export default function App() {
           if (capturedEngine === 'gemini-transcribe') {
             await transcribeWithGemini(audioBlob);
           } else {
-            await transcribeWithWhisper(audioBlob);
+            await transcribeWithWhisper(audioBlob, capturedEngine);
           }
           
           // If continuous mode is on, restart recording after Whisper finishes
@@ -879,27 +879,59 @@ export default function App() {
     }
   };
 
-  const transcribeWithWhisper = async (audioBlob: Blob) => {
+  const transcribeWithWhisper = async (audioBlob: Blob, engine: RecognitionEngine = 'whisper') => {
     if (!audioBlob || audioBlob.size < 100) {
       setIsProcessing(false);
       return;
     }
     
     setIsProcessing(true);
+
+    let openAiModel = 'whisper-1';
+    if (engine === 'gpt-4o-mini-transcribe') {
+      openAiModel = 'gpt-4o-mini-transcribe';
+    } else if (engine === 'gpt-4o-transcribe') {
+      openAiModel = 'gpt-4o-transcribe';
+    }
+
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.webm');
-    formData.append('model', 'whisper-1');
+    formData.append('model', openAiModel);
     formData.append('language', 'zh');
     formData.append('prompt', '請使用繁體中文（台灣）輸出。這是一段繁體中文的語音對話。');
 
     try {
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      let response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`
         },
         body: formData
       });
+
+      // Fallback for audio preview model names if gpt-4o-mini-transcribe / gpt-4o-transcribe direct name fails
+      if (!response.ok && openAiModel !== 'whisper-1') {
+        const altModel = openAiModel === 'gpt-4o-mini-transcribe' ? 'gpt-4o-mini-audio-preview' : 'gpt-4o-audio-preview';
+        console.warn(`Model ${openAiModel} returned status ${response.status}, attempting fallback model ${altModel}...`);
+        
+        const fallbackFormData = new FormData();
+        fallbackFormData.append('file', audioBlob, 'audio.webm');
+        fallbackFormData.append('model', altModel);
+        fallbackFormData.append('language', 'zh');
+        fallbackFormData.append('prompt', '請使用繁體中文（台灣）輸出。這是一段繁體中文的語音對話。');
+
+        const fallbackResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: fallbackFormData
+        });
+
+        if (fallbackResponse.ok) {
+          response = fallbackResponse;
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -919,7 +951,7 @@ export default function App() {
       }
 
       const data = await response.json();
-      const transcribedText = data.text.trim();
+      const transcribedText = data.text ? data.text.trim() : '';
 
       // Whisper Hallucination Filter
       const hallucinations = [
@@ -949,7 +981,7 @@ export default function App() {
         updateCurrentText('');
       }
     } catch (error: any) {
-      console.error('Whisper API Error:', error);
+      console.error('Whisper/OpenAI API Error:', error);
       updateCurrentText(`錯誤: ${error.message}`);
       triggerVibration(500);
     } finally {
@@ -1167,6 +1199,38 @@ export default function App() {
                 <div className="ml-3">
                   <span className="block text-base font-medium text-gray-900">Whisper AI 單句模式</span>
                   <span className="block text-sm text-gray-500 mt-1">準確度極高，有標點符號。需等整句話講完才會顯示文字，最省資源。</span>
+                </div>
+              </label>
+
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
+                    checked={recognitionEngine === 'gpt-4o-mini-transcribe'}
+                    onChange={() => saveSettings(apiKey, 'gpt-4o-mini-transcribe', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">gpt-4o-mini-transcribe 單句模式</span>
+                  <span className="block text-sm text-gray-500 mt-1">使用 OpenAI gpt-4o-mini 模型進行單句語音轉錄，反應快速。</span>
+                </div>
+              </label>
+
+              <label className="flex items-start cursor-pointer group">
+                <div className="flex items-center h-6">
+                  <input
+                    type="radio"
+                    name="recognitionEngine"
+                    checked={recognitionEngine === 'gpt-4o-transcribe'}
+                    onChange={() => saveSettings(apiKey, 'gpt-4o-transcribe', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="ml-3">
+                  <span className="block text-base font-medium text-gray-900">GPT-4o-transcribe 單句模式</span>
+                  <span className="block text-sm text-gray-500 mt-1">使用 OpenAI GPT-4o 旗艦模型進行單句語音轉錄，高度精準。</span>
                 </div>
               </label>
 
