@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 
 type View = 'main' | 'settings' | 'history';
-type RecognitionEngine = 'web-speech' | 'whisper' | 'gpt-4o-mini-transcribe' | 'gpt-4o-transcribe' | 'whisper-stream' | 'gemini-live' | 'gemini-transcribe';
+type RecognitionEngine = 'web-speech' | 'whisper' | 'gpt-4o-mini-transcribe' | 'gpt-live-transcribe' | 'whisper-stream' | 'gemini-live' | 'gemini-transcribe';
 
 interface HistoryItem {
   id: string;
@@ -890,8 +890,8 @@ export default function App() {
     let openAiModel = 'whisper-1';
     if (engine === 'gpt-4o-mini-transcribe') {
       openAiModel = 'gpt-4o-mini-transcribe';
-    } else if (engine === 'gpt-4o-transcribe') {
-      openAiModel = 'gpt-4o-transcribe';
+    } else if (engine === 'gpt-live-transcribe') {
+      openAiModel = 'gpt-live-transcribe';
     }
 
     const formData = new FormData();
@@ -909,7 +909,7 @@ export default function App() {
         body: formData
       });
 
-      // Fallback for audio preview model names if gpt-4o-mini-transcribe / gpt-4o-transcribe direct name fails
+      // Fallback for audio preview model names if gpt-4o-mini-transcribe / gpt-live-transcribe direct name fails
       if (!response.ok && openAiModel !== 'whisper-1') {
         const altModel = openAiModel === 'gpt-4o-mini-transcribe' ? 'gpt-4o-mini-audio-preview' : 'gpt-4o-audio-preview';
         console.warn(`Model ${openAiModel} returned status ${response.status}, attempting fallback model ${altModel}...`);
@@ -1242,13 +1242,13 @@ export default function App() {
                   <input
                     type="radio"
                     name="recognitionEngine"
-                    checked={recognitionEngine === 'gpt-4o-transcribe'}
-                    onChange={() => saveSettings(apiKey, 'gpt-4o-transcribe', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
+                    checked={recognitionEngine === 'gpt-live-transcribe'}
+                    onChange={() => saveSettings(apiKey, 'gpt-live-transcribe', isMirrorMode, isContinuousMode, fontSize, isVibrationEnabled)}
                     className="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
                   />
                 </div>
                 <div className="ml-3">
-                  <span className="block text-base font-medium text-gray-900">GPT-4o-transcribe 單句模式</span>
+                  <span className="block text-base font-medium text-gray-900">GPT Live Transcribe 單句模式</span>
                   <span className="block text-sm text-gray-500 mt-1">使用 OpenAI GPT-4o 旗艦模型進行單句語音轉錄，高度精準。</span>
                 </div>
               </label>
